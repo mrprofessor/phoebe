@@ -1,0 +1,24 @@
+* phoebe
+:PROPERTIES:
+:CUSTOM_ID: phoebe
+:END:
+
+Phoebe is an experimental programming language built with Haskell.  A
+dynamically typed language with a simple syntax loosely based on the
+specification by [[https://www.cl.cam.ac.uk/archive/mjcg/][Micheal J.C Gordon]]'s book [[https://link.springer.com/book/10.1007/978-1-4612-6228-2][The Denotational
+Description of Programming Languages]]
+
+
+** Features
+:PROPERTIES:
+:CUSTOM_ID: features
+:END:
+
+  - [ ] Variables
+  - [ ] Functions
+  - [ ] Control structures
+  - [ ] Type checking
+  - [ ] REPL
+  - [ ] Error handling
+  - [ ] Garbage collection
+    

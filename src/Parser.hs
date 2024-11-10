@@ -5,10 +5,7 @@ import Parsing
 -- Type and Data declarations
 type Ide = String
 
-data Exp = Zero
-  | One
-  | Two
-  | Three
+data Exp = Number Integer
   | TT
   | FF
   | Read
@@ -16,14 +13,15 @@ data Exp = Zero
   | Not Exp
   | Equal Exp Exp
   | Plus Exp Exp
-  deriving Show
+  | Minus Exp Exp
+  deriving (Eq, Show)
 
 data Cmd = Assign Ide Exp
   | Output Exp
   | IfThenElse Exp Cmd Cmd
   | WhileDo Exp Cmd
   | Seq Cmd Cmd
-  deriving Show
+  deriving (Eq, Show)
 
 -- GRAMMAR: <expr> ::= <term> + <expr> | <term> = <expr> | <term>
 expr :: Parser Exp
@@ -31,6 +29,11 @@ expr = do e1 <- term
           symbol "+"
           e2 <- expr
           return (Plus e1 e2)
+        +++
+       do e1 <- term
+          symbol "-"
+          e2 <- expr
+          return (Minus e1 e2)
         +++
        do e1 <- term
           symbol "="
@@ -49,34 +52,25 @@ term = do symbol "not"
 
 -- GRAMMAR: <factor> ::= 0 | 1 | TT | FF | <ide> | <expr>
 factor :: Parser Exp
-factor = do symbol "0"
-            return Zero
-          +++
-          do symbol "1"
-             return One
-          +++
-          do symbol "2"
-             return Two
-          +++
-          do symbol "3"
-             return Three
-          +++
-          do symbol "true"
-             return TT
-          +++
-          do symbol "false"
-             return FF
-          +++
-          do symbol "read"
-             return Read
-          +++
-          do id <- token identifier
-             return (I id)
-          +++
-          do symbol "("
+factor = (do n <- nat
+             return (Number (toInteger n)))
+         +++
+         (do symbol "true"
+             return TT)
+         +++
+         (do symbol "false"
+             return FF)
+         +++
+         (do symbol "read"
+             return Read)
+         +++
+         (do id <- token identifier
+             return (I id))
+         +++
+         (do symbol "("
              e <- expr
              symbol ")"
-             return e
+             return e)
 
 -- Parse Commands
 -- Grammar: <cmd> :: <ide>:=<expr> | output | if <expr> then <cmd> else <cmd>

@@ -31,10 +31,7 @@ exp_semantics :: Exp -> State -> ExpVal
 cmd_semantics :: Cmd -> State -> CmdVal
 
 -- Semantic function declarations for Expressions
-exp_semantics Zero s = OK (Numeric 0) s
-exp_semantics One s = OK (Numeric 1) s
-exp_semantics Two s = OK (Numeric 2) s
-exp_semantics Three s = OK (Numeric 3) s
+exp_semantics (Number n) s = OK (Numeric n) s
 exp_semantics TT s = OK (Boolean True) s
 exp_semantics FF s = OK (Boolean False) s
 
@@ -70,6 +67,12 @@ exp_semantics (Equal exp1 exp2) s =
 exp_semantics (Plus exp1 exp2) s =
   case (exp_semantics exp1 s, exp_semantics exp2 s) of
     (OK (Numeric n1) s1, OK (Numeric n2) s2) -> OK (Numeric (n1 + n2)) s
+    _ -> error ("Both expressions should be numeric")
+
+-- Subtract two expressions
+exp_semantics (Minus exp1 exp2) s =
+  case (exp_semantics exp1 s, exp_semantics exp2 s) of
+    (OK (Numeric n1) s1, OK (Numeric n2) s2) -> OK (Numeric (n1 - n2)) s
     _ -> error ("Both expressions should be numeric")
 
 -- Semantic function declarations for Commands
@@ -161,3 +164,19 @@ run program input =
 
 -- Test 10: run "x:=0; y:=1; if x=0 then output y else output x" []
 -- Expected output: [Numeric 1]
+
+{- Test 11
+:{
+run "halt := false; \
+\sum := 0; \
+\while not halt do \
+\  if sum = 5 then \
+\    halt := true \
+\  else \
+\    sum := sum + 1; \
+\output sum " []
+:}
+-}
+-- Expected output: [Numeric 5]
+
+
