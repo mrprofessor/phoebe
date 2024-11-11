@@ -79,8 +79,9 @@ sat p            = do {c <- item; if p c then return c else mempty}
 -- Efficiency improving combinators: ---------------------------------
 
 force           :: Parser a -> Parser a
-force p          = Parser (\cs -> let xs = parse p cs in
-                              (fst (head xs), snd (head xs)) : tail xs)
+force p          = Parser (\cs -> case parse p cs of
+                              []     -> []
+                              (x:xs) -> (fst x, snd x) : xs)
 
 (+++)           :: Parser a -> Parser a -> Parser a
 p +++ q          = Parser (\cs -> case parse (p <> q) cs of
