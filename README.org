@@ -14,11 +14,11 @@ Description of Programming Languages]]
 :CUSTOM_ID: features
 :END:
 
-  - [ ] Variables
+  - [X] Numbers(Integers)
+  - [X] Blocks with multi-expressions
+  - [ ] Control Structures (Instead of Cmd)
   - [ ] Functions
-  - [ ] Control structures
   - [ ] Type checking
   - [ ] REPL
-  - [ ] Error handling
   - [ ] Garbage collection
     

@@ -16,8 +16,8 @@ data Exp = Number Integer
   | Minus Exp Exp
   deriving (Eq, Show)
 
-data Cmd = Assign Ide Exp
-  | Output Exp
+data Cmd = Output Exp
+  | Assign Ide Exp
   | IfThenElse Exp Cmd Cmd
   | WhileDo Exp Cmd
   | Seq Cmd Cmd
@@ -73,8 +73,10 @@ factor = (do n <- nat
              return e)
 
 -- Parse Commands
--- Grammar: <cmd> :: <ide>:=<expr> | output | if <expr> then <cmd> else <cmd>
---                 | while <expr> do <cmd>
+-- Grammar: <cmd> :: <ide>:=<expr>
+--                   | output
+--                   | if <expr> then <cmd> else <cmd>
+--                   | while <expr> do <cmd>
 cmd :: Parser Cmd
 cmd = do symbol "output"
          e <- expr
@@ -83,15 +85,15 @@ cmd = do symbol "output"
        do symbol "if"
           e <- expr
           symbol "then"
-          c1 <- cmd
+          c1 <- cmdblock
           symbol "else"
-          c2 <- cmd
+          c2 <- cmdblock
           return (IfThenElse e c1 c2)
        +++
        do symbol "while"
           e <- expr
           symbol "do"
-          c <- cmd
+          c <- cmdblock
           return (WhileDo e c)
        +++
        do id <- token identifier
@@ -100,14 +102,26 @@ cmd = do symbol "output"
           return (Assign id e)
 
 -- Parse sequences of commands separately to prevent infinite recursion
--- Grammar <cmdseq> :: <cmd> ; <cmd>
+-- Grammar <cmdseq> :: <cmd> ; <cmd> | <cmd> | <cmd> ;
 cmdseq :: Parser Cmd
 cmdseq = do c1 <- cmd
-            symbol ";"
-            c2 <- cmdseq
-            return (Seq c1 c2)
-          +++
-            cmd
+            (do symbol ";"
+                (do c2 <- cmdseq
+                    return (Seq c1 c2)
+                 +++
+                 return c1)  -- Optional trailing semicolon
+             +++
+             return c1)      -- No semicolon
+  
+
+-- Parse a block of commands enclosed in curly braces
+-- Grammar: <cmdblock> ::= { <cmdseq> }
+cmdblock :: Parser Cmd
+cmdblock = do symbol "{"
+              c <- cmdseq
+              symbol "}"
+              return c
+           +++ cmd
             
 
 -- Parse Expressions
@@ -123,16 +137,4 @@ cparse xs = case (parse cmdseq xs) of
               [(n, [])]  -> n
               [(_, out)] -> error ("Unused input " ++ out)
               []         -> error "Invalid input"
-
--- Test cases
--- Test 1: eparse "1+1"
--- Test 2: eparse "1=1"
--- Test 3: eparse "not 1"
-
--- Test 4: cparse "output 1"
--- Test 5: cparse "if 1 then output 1 else output 0"
--- Test 6: cparse "while 1 do output 0"
--- Test 7: cparse "x:=1; output x"
--- Gordon Test Cases
--- cparse "sum:=0; x:=read; while not (x=1) do sum:=sum+x; x:=read; output sum"
 

@@ -1,6 +1,8 @@
 module Interpreter where
-import Parser -- This is the Parser.hs file
+import Data.Map (Map)
+import qualified Data.Map as Map
 
+import Parser  -- Import the parser module
 
 -- Semantic domains for the language
 data Value = Numeric Integer
@@ -13,16 +15,23 @@ data MemVal = Stored Value
   deriving Show
 
 -- Representation of the memory
-type Memory = Ide -> MemVal -- Memory stores a value for an identifier
+type Memory = Map Ide MemVal         -- Memory is a map of Identifiers to Values
 type Input = [Value]
 type Output = [Value]
 type State = (Memory, Input, Output) -- Triple of Memory, Input and Output
 
+-- Initial Empty Memory
+emptymem :: Memory
+emptymem = Map.empty
 
 -- Display the memory
--- Works only for the identifiers x, y, z
 display :: Memory -> String
-display m = "x = " ++ show (m "x") ++ ", y = " ++ show (m "y") ++ ", z = " ++ show ( m "z") ++ " "
+display memory = 
+  "Memory:\n" ++ unlines (map (\(k, v) -> k ++ " -> " ++ show v) (Map.toList memory))
+
+-- Print the State
+printState :: State -> String
+printState (m, i, o) = display m ++ "Input: " ++ show i ++ "\nOutput: " ++ show o
 
 -- Semantic function definitions for Exp and Cmd
 data ExpVal = OK Value State | Error
@@ -30,11 +39,10 @@ data CmdVal = OKc State | Errorc
 exp_semantics :: Exp -> State -> ExpVal
 cmd_semantics :: Cmd -> State -> CmdVal
 
--- Semantic function declarations for Expressions
+  -- Semantic function declarations for Expressions
 exp_semantics (Number n) s = OK (Numeric n) s
 exp_semantics TT s = OK (Boolean True) s
 exp_semantics FF s = OK (Boolean False) s
-
 
 -- Read the first value from the input
 exp_semantics Read (m, [], o) =
@@ -44,10 +52,10 @@ exp_semantics Read (m, [], o) =
 exp_semantics Read (m, i:is, o) = OK i (m, is, o) -- Read the first value
 
 -- Check if the identifier is stored in the memory
-exp_semantics (I ide) (m, i, o) = case m ide of
-  Stored v -> OK v (m, i, o)
-  -- Unbound -> Error
-  Unbound   -> error (display m ++ "Input: " ++ show i ++ " " ++ "Output: " ++ show o ++ "\n Unbound identifier " ++ ide)
+exp_semantics (I ide) (m, i, o) = case Map.lookup ide m of
+  Just (Stored v) -> OK v (m, i, o)
+  Just Unbound -> error ("Unbound identifier " ++ ide ++ "\n" ++ printState (m, i, o))
+  Nothing -> error ("Unbound identifier " ++ ide ++ "\n" ++ printState (m, i, o))
 
 -- 'Not' expression can only be applied to boolean values
 exp_semantics (Not exp) s = case (exp_semantics exp s) of
@@ -78,18 +86,16 @@ exp_semantics (Minus exp1 exp2) s =
 -- Semantic function declarations for Commands
 
 -- Helper functions to interact with the memory
--- Update the memory with the new value
+-- Update the memory with a new value
 update :: Memory -> Ide -> Value -> Memory
-update memory ide val = \x -> if x == ide then Stored val else memory x
+update memory ide val = Map.insert ide (Stored val) memory
 
 -- Search for the value of the identifier in the memory
 search :: Memory -> Ide -> Value
-search memory ide = case memory ide of
-  Stored v -> v
-  Unbound -> error ("Unbound identifier " ++ ide)
-
--- Initialize every new identifier with Unbound
-emptymem ide = Unbound
+search memory ide = case Map.lookup ide memory of
+  Just (Stored v) -> v
+  Just Unbound -> error ("Unbound identifier " ++ ide)
+  Nothing -> error ("Unbound identifier " ++ ide)
 
 -- Semantic function for Assign command
 cmd_semantics (Assign ide exp) s =
@@ -132,51 +138,3 @@ run program input =
     Errorc -> [ERROR]
   where
     parsed_program = cparse program
-
-
--- Test cases
--- Test 1: run "output 1" []
--- Expected output: [Numeric 1]
-
--- Test 2: run "output 1" [Numeric 2]
--- Expected output: [Numeric 1]
-
--- Test 3: run "output 0; output 1" [Numeric 2]
--- Expected output: [Numeric 0, Numeric 1]
-
--- Test 4: run "if 1=1 then output 1 else output 0" []
--- Expected output: [Numeric 1]
-
--- Test 5: run "if 1=0 then output 1 else output 0" []
--- Expected output: [Numeric 0]
-
--- Test 6: run "while 1=1 do output 0" []
--- Expected output: Infinite loop, so the program will not terminate
-
--- Test 7: run "while 1=0 do output 0" []
--- Expected output: []
-
--- Test 8: run "x:=1; output x" []
--- Expected output: [Numeric 1]
-
--- Test 9: run "x:=0; y:=1; output x; output y" []
--- Expected output: [Numeric 0, Numeric 1]
-
--- Test 10: run "x:=0; y:=1; if x=0 then output y else output x" []
--- Expected output: [Numeric 1]
-
-{- Test 11
-:{
-run "halt := false; \
-\sum := 0; \
-\while not halt do \
-\  if sum = 5 then \
-\    halt := true \
-\  else \
-\    sum := sum + 1; \
-\output sum " []
-:}
--}
--- Expected output: [Numeric 5]
-
-
