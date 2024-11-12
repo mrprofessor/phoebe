@@ -6,8 +6,7 @@ import Parsing
 type Ide = String
 
 data Exp = Number Integer
-  | TT
-  | FF
+  | Bool Bool
   | Read
   | I Ide
   | Not Exp
@@ -16,7 +15,8 @@ data Exp = Number Integer
   | Minus Exp Exp
   deriving (Eq, Show)
 
-data Cmd = Output Exp
+data Cmd = Skip
+  | Output Exp
   | Assign Ide Exp
   | IfThenElse Exp Cmd Cmd
   | WhileDo Exp Cmd
@@ -53,13 +53,13 @@ term = do symbol "not"
 -- GRAMMAR: <factor> ::= 0 | 1 | TT | FF | <ide> | <expr>
 factor :: Parser Exp
 factor = (do n <- nat
-             return (Number (toInteger n)))
+             return (Number (toInteger n))) -- 0 | 1 | 2 ....
          +++
          (do symbol "true"
-             return TT)
+             return (Bool True))  -- TT
          +++
          (do symbol "false"
-             return FF)
+             return (Bool False)) -- FF
          +++
          (do symbol "read"
              return Read)
@@ -73,33 +73,38 @@ factor = (do n <- nat
              return e)
 
 -- Parse Commands
--- Grammar: <cmd> :: <ide>:=<expr>
---                   | output
+-- Grammar: <cmd> :: skip
+--                   | output <expr>
 --                   | if <expr> then <cmd> else <cmd>
 --                   | while <expr> do <cmd>
+--                   | <ide> := <expr>
 cmd :: Parser Cmd
-cmd = do symbol "output"
-         e <- expr
-         return (Output e)
-       +++
-       do symbol "if"
-          e <- expr
-          symbol "then"
-          c1 <- cmdblock
-          symbol "else"
-          c2 <- cmdblock
-          return (IfThenElse e c1 c2)
-       +++
-       do symbol "while"
-          e <- expr
-          symbol "do"
-          c <- cmdblock
-          return (WhileDo e c)
-       +++
-       do id <- token identifier
-          symbol ":="
-          e <- expr
-          return (Assign id e)
+cmd = 
+    do symbol "skip"
+       return Skip
+    +++
+    do symbol "output"
+       e <- expr
+       return (Output e)
+    +++
+    do symbol "if"
+       e <- expr
+       symbol "then"
+       c1 <- cmdblock
+       symbol "else"
+       c2 <- cmdblock
+       return (IfThenElse e c1 c2)
+    +++
+    do symbol "while"
+       e <- expr
+       symbol "do"
+       c <- cmdblock
+       return (WhileDo e c)
+    +++
+    do id <- token identifier
+       symbol ":="
+       e <- expr
+       return (Assign id e)
 
 -- Parse sequences of commands separately to prevent infinite recursion
 -- Grammar <cmdseq> :: <cmd> ; <cmd> | <cmd> | <cmd> ;
@@ -113,7 +118,6 @@ cmdseq = do c1 <- cmd
              +++
              return c1)      -- No semicolon
   
-
 -- Parse a block of commands enclosed in curly braces
 -- Grammar: <cmdblock> ::= { <cmdseq> }
 cmdblock :: Parser Cmd
@@ -122,7 +126,6 @@ cmdblock = do symbol "{"
               symbol "}"
               return c
            +++ cmd
-            
 
 -- Parse Expressions
 eparse :: String -> Exp

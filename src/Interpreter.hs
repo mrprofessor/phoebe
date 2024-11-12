@@ -15,7 +15,7 @@ data MemVal = Stored Value
   deriving Show
 
 -- Representation of the memory
-type Memory = Map Ide MemVal         -- Memory is a map of Identifiers to Values
+type Memory = Map Ide MemVal
 type Input = [Value]
 type Output = [Value]
 type State = (Memory, Input, Output) -- Triple of Memory, Input and Output
@@ -26,10 +26,20 @@ emptymem = Map.empty
 
 -- Display the memory
 display :: Memory -> String
-display memory = 
-  "Memory:\n" ++ unlines (map (\(k, v) -> k ++ " -> " ++ show v) (Map.toList memory))
+display m = "Memory:\n" ++ show (Map.toList m)
 
--- Print the State
+-- Helper functions to interact with the memory
+-- Update the memory with a new value
+update :: Memory -> Ide -> Value -> Memory
+update memory ide val = Map.insert ide (Stored val) memory
+
+-- Search for the value of the identifier in the memory
+search :: Memory -> Ide -> MemVal
+search memory ide = case Map.lookup ide memory of
+  Just (Stored v) -> Stored v
+  _ -> Unbound
+
+  -- Print the State
 printState :: State -> String
 printState (m, i, o) = display m ++ "Input: " ++ show i ++ "\nOutput: " ++ show o
 
@@ -41,21 +51,18 @@ cmd_semantics :: Cmd -> State -> CmdVal
 
   -- Semantic function declarations for Expressions
 exp_semantics (Number n) s = OK (Numeric n) s
-exp_semantics TT s = OK (Boolean True) s
-exp_semantics FF s = OK (Boolean False) s
+exp_semantics (Bool b) s = OK (Boolean b) s
 
 -- Read the first value from the input
-exp_semantics Read (m, [], o) =
-  -- error ("Input required") -- If the input is empty, throw an error
-  error (display m ++ "Input: " ++ "[] " ++ "Output: " ++ show o)
-  
+-- error ("Input required") -- If the input is empty, throw an error
+exp_semantics Read (m, [], o) = error (printState (m, [], o))
 exp_semantics Read (m, i:is, o) = OK i (m, is, o) -- Read the first value
 
 -- Check if the identifier is stored in the memory
-exp_semantics (I ide) (m, i, o) = case Map.lookup ide m of
-  Just (Stored v) -> OK v (m, i, o)
-  Just Unbound -> error ("Unbound identifier " ++ ide ++ "\n" ++ printState (m, i, o))
-  Nothing -> error ("Unbound identifier " ++ ide ++ "\n" ++ printState (m, i, o))
+exp_semantics (I ide) s = case (search m ide) of
+  Stored v -> OK v s
+  Unbound -> error ("Identifier " ++ ide ++ " not found in memory\n" ++ printState s)
+  where (m, _, _) = s
 
 -- 'Not' expression can only be applied to boolean values
 exp_semantics (Not exp) s = case (exp_semantics exp s) of
@@ -85,17 +92,8 @@ exp_semantics (Minus exp1 exp2) s =
 
 -- Semantic function declarations for Commands
 
--- Helper functions to interact with the memory
--- Update the memory with a new value
-update :: Memory -> Ide -> Value -> Memory
-update memory ide val = Map.insert ide (Stored val) memory
-
--- Search for the value of the identifier in the memory
-search :: Memory -> Ide -> Value
-search memory ide = case Map.lookup ide memory of
-  Just (Stored v) -> v
-  Just Unbound -> error ("Unbound identifier " ++ ide)
-  Nothing -> error ("Unbound identifier " ++ ide)
+-- Semantic function for Skip command (It does nothing)
+cmd_semantics Skip s = OKc s
 
 -- Semantic function for Assign command
 cmd_semantics (Assign ide exp) s =

@@ -12,11 +12,11 @@ testParseExpressions = describe "Expression Parser Tests" $ do
 
   it "parses a Boolean True value" $ do
     eparse "true"
-      `shouldBe` TT
+      `shouldBe` Bool True
     
   it "parses a Boolean False value" $ do
     eparse "false"
-      `shouldBe` FF
+      `shouldBe` Bool False
 
   it "parses a read value" $ do
     eparse "read"
@@ -28,7 +28,7 @@ testParseExpressions = describe "Expression Parser Tests" $ do
 
   it "parses a Not expression" $ do
     eparse "not true"
-      `shouldBe` Not TT
+      `shouldBe` Not (Bool True)
 
   it "parses an equality check" $ do
     eparse "1 = 1"
@@ -60,23 +60,31 @@ testParseCommands = describe "Commands Parser Tests" $ do
     cparse "x := 10"
       `shouldBe` Assign "x" (Number 10)
 
+  it "parses a Skip command" $ do
+    cparse "skip"
+      `shouldBe` Skip
+
+  it "parses an IfThenElse command with a Skip command" $ do
+    cparse "if true then skip else skip"
+      `shouldBe` IfThenElse (Bool True) Skip Skip
+
   it "parses an IfThenElse command" $ do
     cparse "if true then output 10 else output 20"
-      `shouldBe` IfThenElse TT (Output (Number 10)) (Output (Number 20))
+      `shouldBe` IfThenElse (Bool True) (Output (Number 10)) (Output (Number 20))
 
   it "parses a sequence of commands with an if-then-else" $ do
     cparse "if true then {x:=10; output x;} else {x:=20; output x;}"
-      `shouldBe` IfThenElse TT (Seq (Assign "x" (Number 10)) (Output (I "x")))
+      `shouldBe` IfThenElse (Bool True) (Seq (Assign "x" (Number 10)) (Output (I "x")))
                                (Seq (Assign "x" (Number 20)) (Output (I "x")))
 
   it "parses a While command" $ do
     cparse "while true do output 10"
-      `shouldBe` WhileDo TT (Output (Number 10))
+      `shouldBe` WhileDo (Bool True) (Output (Number 10))
 
   it "parses a sequence of commands with a while loop" $ do
     cparse "x:=10; while true do {x:=20; output x;}"
       `shouldBe` Seq (Assign "x" (Number 10))
-                     (WhileDo TT (Seq (Assign "x" (Number 20)) (Output (I "x"))))
+                     (WhileDo (Bool True) (Seq (Assign "x" (Number 20)) (Output (I "x"))))
 
   it "parses a sequence of commands" $ do
     cparse "output 10; output 20"
