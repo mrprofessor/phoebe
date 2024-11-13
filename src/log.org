@@ -25,9 +25,9 @@
     -- Search for the value of the identifier in the memory
     search :: Memory -> Ide -> Value
     search memory ide = case Map.lookup ide memory of
-      Just (Stored v) -> v
-      Just Unbound -> error ("Unbound identifier " ++ ide)
-      Nothing -> error ("Unbound identifier " ++ ide)
+      Just (Stored v) -> Stored v
+      _ -> Unbound
+
   #+end_src
 
 - Memory represented as a tuple of a list of identifiers and a function
@@ -51,9 +51,8 @@
 
     -- Search for the value of the identifier in the memory
     search :: Memory -> Ide -> Value
-    search ([], _) ide = error ("Unbound identifier " ++ ide)
     search (ides, f) ide = case f ide of
-      Stored v -> v
-      Unbound -> error ("Unbound identifier " ++ ide)
+      Just (Stored v) -> Stored v
+      _ -> Unbound
   #+end_src
 

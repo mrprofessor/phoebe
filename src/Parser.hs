@@ -11,6 +11,8 @@ data Exp = Number Integer
   | I Ide
   | Not Exp
   | Equal Exp Exp
+  | Greater Exp Exp
+  | Lesser Exp Exp
   | Plus Exp Exp
   | Minus Exp Exp
   deriving (Eq, Show)
@@ -39,6 +41,16 @@ expr = do e1 <- term
           symbol "="
           e2 <- expr
           return (Equal e1 e2)
+        +++
+       do e1 <- term
+          symbol ">"
+          e2 <- expr
+          return (Greater e1 e2)
+        +++
+       do e1 <- term
+          symbol "<"
+          e2 <- expr
+          return (Lesser e1 e2)
         +++
           term
 
@@ -75,8 +87,8 @@ factor = (do n <- nat
 -- Parse Commands
 -- Grammar: <cmd> :: skip
 --                   | output <expr>
---                   | if <expr> then <cmd> else <cmd>
---                   | while <expr> do <cmd>
+--                   | if <expr> then <cmdblock> else <cmdblock>
+--                   | while <expr> do <cmdblock>
 --                   | <ide> := <expr>
 cmd :: Parser Cmd
 cmd = 
@@ -128,16 +140,16 @@ cmdblock = do symbol "{"
            +++ cmd
 
 -- Parse Expressions
-eparse :: String -> Exp
+eparse :: String -> Maybe Exp
 eparse xs = case (parse expr xs) of
-              [(n, [])]  -> n
-              [(_, out)] -> error ("Unused input " ++ out)
-              []         -> error "Invalid input"
-              
+              [(n, [])]  -> Just n
+              [(_, out)] -> Nothing
+              []         -> Nothing
+
 -- Parse Commands
-cparse :: String -> Cmd
+cparse :: String -> Maybe Cmd
 cparse xs = case (parse cmdseq xs) of
-              [(n, [])]  -> n
-              [(_, out)] -> error ("Unused input " ++ out)
-              []         -> error "Invalid input"
+              [(n, [])]  -> Just n
+              [(_, out)] -> Nothing
+              []         -> Nothing
 

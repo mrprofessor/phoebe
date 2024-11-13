@@ -16,9 +16,10 @@ Description of Programming Languages]]
 
   - [X] Numbers(Integers)
   - [X] Blocks with multi-expressions
-  - [ ] Control Structures (Instead of Cmd)
-  - [ ] Functions
+  - [ ] Functions (Call by ref/value/name)
+  - [ ] Dynamic/Static binding
   - [ ] Type checking
-  - [ ] REPL
+  - [X] REPL
+  - [ ] Control Structures (Instead of Cmd)
   - [ ] Garbage collection
     

@@ -19,10 +19,10 @@ instance Ord Value where
   compare (Numeric x) (Numeric y) = compare x y
   compare (Boolean x) (Boolean y) = compare x y
   compare ERROR ERROR = EQ
-  compare ERROR _ = Error "Error is incomparable" 
-  compare _ ERROR = Error "Error is incomparable" 
-  compare (Numeric _) (Boolean _) = Error "Cannot compare Numeric with Boolean"
-  compare (Boolean _) (Numeric _) = Error "Cannot compare Boolean with Numeric"
+  compare ERROR _ = error "Error is incomparable" 
+  compare _ ERROR = error "Error is incomparable" 
+  compare (Numeric _) (Boolean _) = error "Cannot compare Numeric with Boolean"
+  compare (Boolean _) (Numeric _) = error "Cannot compare Boolean with Numeric"
   
 -- Representation of the memory
 type Memory = Map Ide MemVal
