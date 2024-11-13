@@ -14,11 +14,21 @@ data MemVal = Stored Value
   | Unbound
   deriving Show
 
+-- Custome Ord class for data Value
+instance Ord Value where
+  compare (Numeric x) (Numeric y) = compare x y
+  compare (Boolean x) (Boolean y) = compare x y
+  compare ERROR ERROR = EQ
+  compare ERROR _ = Error "Error is incomparable" 
+  compare _ ERROR = Error "Error is incomparable" 
+  compare (Numeric _) (Boolean _) = Error "Cannot compare Numeric with Boolean"
+  compare (Boolean _) (Numeric _) = Error "Cannot compare Boolean with Numeric"
+  
 -- Representation of the memory
 type Memory = Map Ide MemVal
 type Input = [Value]
 type Output = [Value]
-type State = (Memory, Input, Output) -- Triple of Memory, Input and Output
+type State = (Memory, Input, Output)
 
 -- Initial Empty Memory
 emptymem :: Memory
@@ -41,11 +51,11 @@ search memory ide = case Map.lookup ide memory of
 
   -- Print the State
 printState :: State -> String
-printState (m, i, o) = display m ++ "Input: " ++ show i ++ "\nOutput: " ++ show o
+printState (m, i, o) = display m ++ "Input: " ++ show i ++ "Output: " ++ show o
 
 -- Semantic function definitions for Exp and Cmd
-data ExpVal = OK Value State | Error
-data CmdVal = OKc State | Errorc
+data ExpVal = OK Value State | Error String
+data CmdVal = OKc State | Errorc String
 exp_semantics :: Exp -> State -> ExpVal
 cmd_semantics :: Cmd -> State -> CmdVal
 
@@ -54,41 +64,52 @@ exp_semantics (Number n) s = OK (Numeric n) s
 exp_semantics (Bool b) s = OK (Boolean b) s
 
 -- Read the first value from the input
--- error ("Input required") -- If the input is empty, throw an error
-exp_semantics Read (m, [], o) = error (printState (m, [], o))
+-- If the input is empty, throw an error
+exp_semantics Read (m, [], o) = Error "Input Required"
 exp_semantics Read (m, i:is, o) = OK i (m, is, o) -- Read the first value
 
 -- Check if the identifier is stored in the memory
-exp_semantics (I ide) s = case (search m ide) of
-  Stored v -> OK v s
-  Unbound -> error ("Identifier " ++ ide ++ " not found in memory\n" ++ printState s)
-  where (m, _, _) = s
+exp_semantics (I ide) (m, i, o) =
+  case (search m ide) of
+    Stored v -> OK v (m, i, o)
+    Unbound -> Error $ "Identifier " ++ ide ++ " not found in memory"
 
 -- 'Not' expression can only be applied to boolean values
 exp_semantics (Not exp) s = case (exp_semantics exp s) of
   OK (Boolean v) s -> OK (Boolean (not v)) s
-  OK (Numeric _) s -> error ("\'not\' can only be applied to boolean values")
-  _ -> error (display m ++ "Input: " ++ show i ++ " " ++ "Output: " ++ show o)
-             where (m, i, o) = s
+  OK (Numeric _) s -> Error "\'not\' can only be applied to boolean values"
+  _ -> Error "Invalid operand for 'not'" 
 
 -- Check if the two expressions are equal
 -- If they are equal, return OK, else Error
 exp_semantics (Equal exp1 exp2) s =
   case (exp_semantics exp1 s, exp_semantics exp2 s) of
     (OK v1 s1, OK v2 s2) -> OK (Boolean (v1 == v2)) s
-    _ -> error ("Both expressions must be of the same type")
+    _ -> Error "Equality comparison requires both operands to be of the same type"
+
+-- Check if the first expression is greater than the second
+exp_semantics (Greater exp1 exp2) s =
+  case (exp_semantics exp1 s, exp_semantics exp2 s) of
+    (OK v1 s1, OK v2 s2) -> OK (Boolean (v1 > v2)) s
+    _ -> Error "Greater-than comparison requires both operands to be numeric"
+
+-- Check if the first expression is lesser than the second
+exp_semantics (Lesser exp1 exp2) s =
+  case (exp_semantics exp1 s, exp_semantics exp2 s) of
+    (OK v1 s1, OK v2 s2) -> OK (Boolean (v1 < v2)) s
+    _ -> Error "Less-than comparison requires both operands to be numeric"
 
 -- Add two expressions, if both are numeric return the sum else return Error
 exp_semantics (Plus exp1 exp2) s =
   case (exp_semantics exp1 s, exp_semantics exp2 s) of
     (OK (Numeric n1) s1, OK (Numeric n2) s2) -> OK (Numeric (n1 + n2)) s
-    _ -> error ("Both expressions should be numeric")
+    _ -> Error "Addition requires both operands to be numeric"
 
 -- Subtract two expressions
 exp_semantics (Minus exp1 exp2) s =
   case (exp_semantics exp1 s, exp_semantics exp2 s) of
     (OK (Numeric n1) s1, OK (Numeric n2) s2) -> OK (Numeric (n1 - n2)) s
-    _ -> error ("Both expressions should be numeric")
+    _ -> Error "Substraction requires both operands to be numeric"
 
 -- Semantic function declarations for Commands
 
@@ -99,40 +120,43 @@ cmd_semantics Skip s = OKc s
 cmd_semantics (Assign ide exp) s =
   case (exp_semantics exp s) of
     OK v1 (m1, i1, o1) -> OKc (update m1 ide v1, i1, o1) -- Update the memory
-    Error -> Errorc
+    Error msg -> Errorc $ "Assignment failed: " ++ msg
 
 -- Semantic function for Output command
 cmd_semantics (Output exp) s =
   case (exp_semantics exp s) of
     OK v1 (m1, i1, o1) -> OKc (m1, i1, o1 ++ [v1])
-    Error -> Errorc
+    Error msg -> Errorc $ "Output failed: " ++ msg
 
 -- Semantic function for IfThenElse command
 cmd_semantics (IfThenElse exp cmd1 cmd2) s =
   case (exp_semantics exp s) of
     OK (Boolean True) s1 -> cmd_semantics cmd1 s1
     OK (Boolean False) s1 -> cmd_semantics cmd2 s1
-    _ -> Errorc
+    _ -> Errorc "If-then-else requires a boolean condition"
 
 -- Semantic function for WhileDo command
 cmd_semantics (WhileDo exp cmd) s =
   case (exp_semantics exp s) of
-    OK (Boolean True) s1 -> case (cmd_semantics cmd s1) of
-      OKc s2 -> cmd_semantics (WhileDo exp cmd) s2
-      Errorc -> Errorc
+    OK (Boolean True) s1 ->
+      case (cmd_semantics cmd s1) of
+        OKc s2 -> cmd_semantics (WhileDo exp cmd) s2
+        Errorc msg -> Errorc msg
     OK (Boolean False) s1 -> OKc s1
-    _ -> Errorc
+    _ -> Errorc "While-do requires a boolean condition"
 
 -- Semantic function for Seq command
 cmd_semantics (Seq cmd1 cmd2) s =
   case (cmd_semantics cmd1 s) of
     OKc s1 -> cmd_semantics cmd2 s1
-    Errorc -> Errorc
+    Errorc msg -> Errorc msg
 
 -- Run the program with the given input
-run program input =
-  case (cmd_semantics parsed_program (emptymem, input, [])) of
-    OKc (m, i, o) -> o
-    Errorc -> [ERROR]
-  where
-    parsed_program = cparse program
+run :: String -> [Value] -> [Value]
+run program input = 
+  case cparse program of
+    Just parsed_program -> 
+      case cmd_semantics parsed_program (emptymem, input, []) of
+        OKc (_, _, o) -> o
+        Errorc msg -> [ERROR]
+    Nothing -> [ERROR]  -- Return ERROR if parsing fails
