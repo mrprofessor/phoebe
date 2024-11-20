@@ -1,4 +1,4 @@
-.PHONY: all test build clean repl interpreter
+.PHONY: all test build clean repl parser interpreter 
 
 test:
 	ghci -isrc src/Tests.hs -package containers -e main
@@ -12,5 +12,9 @@ clean:
 repl:
 	ghci -isrc src/Repl.hs -package containers -e main
 
+parser:
+	ghci -isrc src/Parser.hs -package containers
+
 interpreter:
 	ghci -isrc src/Interpreter.hs -package containers
+

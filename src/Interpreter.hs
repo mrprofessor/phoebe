@@ -28,7 +28,7 @@ instance Ord Value where
 type Memory = Map Ide MemVal
 type Input = [Value]
 type Output = [Value]
-type State = (Memory, Input, Output)
+type State = (Memory, Input, Output) -- TODO: Use a record instead
 
 -- Initial Empty Memory
 emptymem :: Memory
@@ -59,9 +59,9 @@ data CmdVal = OKc State | Errorc String
 exp_semantics :: Exp -> State -> ExpVal
 cmd_semantics :: Cmd -> State -> CmdVal
 
-  -- Semantic function declarations for Expressions
-exp_semantics (Number n) s = OK (Numeric n) s
-exp_semantics (Bool b) s = OK (Boolean b) s
+-- Semantic function declarations for Expressions
+exp_semantics (BasicConstant (Number n)) s = OK (Numeric n) s
+exp_semantics (BasicConstant (Bool b)) s = OK (Boolean b) s
 
 -- Read the first value from the input
 -- If the input is empty, throw an error
@@ -75,41 +75,39 @@ exp_semantics (I ide) (m, i, o) =
     Unbound -> Error $ "Identifier " ++ ide ++ " not found in memory"
 
 -- 'Not' expression can only be applied to boolean values
-exp_semantics (Not exp) s = case (exp_semantics exp s) of
+exp_semantics (UnaryOp Not exp) s = case (exp_semantics exp s) of
   OK (Boolean v) s -> OK (Boolean (not v)) s
   OK (Numeric _) s -> Error "\'not\' can only be applied to boolean values"
   _ -> Error "Invalid operand for 'not'" 
 
--- Check if the two expressions are equal
--- If they are equal, return OK, else Error
-exp_semantics (Equal exp1 exp2) s =
+-- TODO: Use Correct Error message
+-- Consolidated RelationalOp function
+exp_semantics (BinaryOp (RelationalOp op) exp1 exp2) s =
   case (exp_semantics exp1 s, exp_semantics exp2 s) of
-    (OK v1 s1, OK v2 s2) -> OK (Boolean (v1 == v2)) s
-    _ -> Error "Equality comparison requires both operands to be of the same type"
+    (OK v1 s1, OK v2 s2) ->
+      case op of
+        Equal -> OK (Boolean (v1 == v2)) s
+        Greater -> OK (Boolean (v1 > v2)) s
+        Lesser -> OK (Boolean (v1 < v2)) s
+    _ -> Error "Relational operation requires both operands to of same type"
 
--- Check if the first expression is greater than the second
-exp_semantics (Greater exp1 exp2) s =
+-- Consolidated ArithmeticOp function
+exp_semantics (BinaryOp (ArithmeticOp op) exp1 exp2) s =
   case (exp_semantics exp1 s, exp_semantics exp2 s) of
-    (OK v1 s1, OK v2 s2) -> OK (Boolean (v1 > v2)) s
-    _ -> Error "Greater-than comparison requires both operands to be numeric"
+    (OK (Numeric n1) s1, OK (Numeric n2) s2) ->
+      case op of
+        Plus -> OK (Numeric (n1 + n2)) s
+        Minus -> OK (Numeric (n1 - n2)) s
+        Times -> OK (Numeric (n1 * n2)) s
+        Div -> OK (Numeric (n1 `div` n2)) s
+    _ -> Error "Arithmetic operation requires both operands to be numeric"
 
--- Check if the first expression is lesser than the second
-exp_semantics (Lesser exp1 exp2) s =
-  case (exp_semantics exp1 s, exp_semantics exp2 s) of
-    (OK v1 s1, OK v2 s2) -> OK (Boolean (v1 < v2)) s
-    _ -> Error "Less-than comparison requires both operands to be numeric"
-
--- Add two expressions, if both are numeric return the sum else return Error
-exp_semantics (Plus exp1 exp2) s =
-  case (exp_semantics exp1 s, exp_semantics exp2 s) of
-    (OK (Numeric n1) s1, OK (Numeric n2) s2) -> OK (Numeric (n1 + n2)) s
-    _ -> Error "Addition requires both operands to be numeric"
-
--- Subtract two expressions
-exp_semantics (Minus exp1 exp2) s =
-  case (exp_semantics exp1 s, exp_semantics exp2 s) of
-    (OK (Numeric n1) s1, OK (Numeric n2) s2) -> OK (Numeric (n1 - n2)) s
-    _ -> Error "Substraction requires both operands to be numeric"
+-- Semantic function for IfThenElse expression
+exp_semantics (IfThenElseExp exp1 exp2 exp3) s =
+  case (exp_semantics exp1 s) of
+    OK (Boolean True) s1 -> exp_semantics exp2 s1
+    OK (Boolean False) s1 -> exp_semantics exp3 s1
+    _ -> Error "If-then-else requires a boolean condition"
 
 -- Semantic function declarations for Commands
 
@@ -129,7 +127,7 @@ cmd_semantics (Output exp) s =
     Error msg -> Errorc $ "Output failed: " ++ msg
 
 -- Semantic function for IfThenElse command
-cmd_semantics (IfThenElse exp cmd1 cmd2) s =
+cmd_semantics (IfThenElseCmd exp cmd1 cmd2) s =
   case (exp_semantics exp s) of
     OK (Boolean True) s1 -> cmd_semantics cmd1 s1
     OK (Boolean False) s1 -> cmd_semantics cmd2 s1
@@ -159,4 +157,3 @@ run program input =
       case cmd_semantics parsed_program (emptymem, input, []) of
         OKc (_, _, o) -> o
         Errorc msg -> [ERROR]
-    Nothing -> [ERROR]  -- Return ERROR if parsing fails

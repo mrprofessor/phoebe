@@ -2,87 +2,136 @@ module Parser where
 import Parsing
 
 
--- Type and Data declarations
+-- Identifier
 type Ide = String
 
-data Exp = Number Integer
-  | Bool Bool
-  | Read
-  | I Ide
-  | Not Exp
-  | Equal Exp Exp
-  | Greater Exp Exp
-  | Lesser Exp Exp
-  | Plus Exp Exp
-  | Minus Exp Exp
+ -- Basic Constants
+data BasicConstant
+  = Number Integer                         -- Numeric constants ( 0, 1, 42)
+  | Bool Bool                              -- Boolean constants (true, false)
   deriving (Eq, Show)
 
-data Cmd = Skip
-  | Output Exp
-  | Assign Ide Exp
-  | IfThenElse Exp Cmd Cmd
-  | WhileDo Exp Cmd
-  | Seq Cmd Cmd
+-- Operators
+data ArithmeticOp = Plus | Minus | Times | Div
   deriving (Eq, Show)
+
+data RelationalOp = Equal | Greater | Lesser
+  deriving (Eq, Show)
+
+data BinaryOp = ArithmeticOp ArithmeticOp | RelationalOp RelationalOp
+  deriving (Eq, Show)
+
+data UnaryOp = Not
+  deriving (Eq, Show)
+
+-- Expressions
+data Exp
+  = BasicConstant BasicConstant            -- Basic constants(Number, Boolean)
+  | Read                                   -- The read expression (from input)
+  | I Ide                                  -- Identifiers
+  | UnaryOp UnaryOp Exp                    -- Unary operators(Not)
+  | BinaryOp BinaryOp Exp Exp              -- Binary operators
+  | Call Ide Exp                           -- Function calls
+  | IfThenElseExp Exp Exp Exp              -- "if E then E1 else E2"
+  deriving (Eq, Show)
+
+
+-- Commands
+data Cmd
+  = Skip                                   -- The skip command
+  | Output Exp                             -- Output E
+  | Assign Ide Exp                         -- Assignment "I := E"
+  | IfThenElseCmd Exp Cmd Cmd              -- "if E then C1 else C2"
+  | WhileDo Exp Cmd                        -- "while E do C"
+  | Seq Cmd Cmd                            -- Sequence of commands "C1; C2"
+  deriving (Eq, Show)
+
+-- Declarations
+data Dec
+  = Const Ide Exp                          -- Constant "const I = E"
+  | Var Ide Exp                            -- Variable "var I = E"
+  | Fun Ide [Ide] Cmd                      -- Function "fun I (I1, ..., In) C"
+  | Proc Ide [Ide] Cmd                     -- Procedure "proc I (I1, ..., In) C
+
 
 -- GRAMMAR: <expr> ::= <term> + <expr> | <term> = <expr> | <term>
 expr :: Parser Exp
-expr = do e1 <- term
-          symbol "+"
-          e2 <- expr
-          return (Plus e1 e2)
-        +++
-       do e1 <- term
-          symbol "-"
-          e2 <- expr
-          return (Minus e1 e2)
-        +++
-       do e1 <- term
-          symbol "="
-          e2 <- expr
-          return (Equal e1 e2)
-        +++
-       do e1 <- term
-          symbol ">"
-          e2 <- expr
-          return (Greater e1 e2)
-        +++
-       do e1 <- term
-          symbol "<"
-          e2 <- expr
-          return (Lesser e1 e2)
-        +++
-          term
+expr = 
+     do e1 <- term
+        symbol "+"
+        e2 <- expr
+        return (BinaryOp (ArithmeticOp Plus) e1 e2)
+      +++
+      do e1 <- term
+         symbol "-"
+         e2 <- expr
+         return (BinaryOp (ArithmeticOp Minus) e1 e2)
+      +++
+      do e1 <- term
+         symbol "*"
+         e2 <- expr
+         return (BinaryOp (ArithmeticOp Times) e1 e2)
+      +++
+      do e1 <- term
+         symbol "/"
+         e2 <- expr
+         return (BinaryOp (ArithmeticOp Div) e1 e2)
+      +++
+      do e1 <- term
+         symbol "="
+         e2 <- expr
+         return (BinaryOp (RelationalOp Equal) e1 e2)
+      +++
+      do e1 <- term
+         symbol ">"
+         e2 <- expr
+         return (BinaryOp (RelationalOp Greater) e1 e2)
+      +++
+      do e1 <- term
+         symbol "<"
+         e2 <- expr
+         return (BinaryOp (RelationalOp Lesser) e1 e2)
+      +++
+      do symbol "if"
+         cond <- expr
+         symbol "then"
+         e1 <- expr
+         symbol "else"
+         e2 <- expr
+         return (IfThenElseExp cond e1 e2)
+      +++
+      term
 
 -- GRAMMAR: <term> ::= not <expr> | <factor>
 term :: Parser Exp
 term = do symbol "not"
           e <- expr
-          return (Not e)
+          return (UnaryOp Not e)
         +++
           factor
 
 -- GRAMMAR: <factor> ::= 0 | 1 | TT | FF | <ide> | <expr>
 factor :: Parser Exp
-factor = (do n <- nat
-             return (Number (toInteger n))) -- 0 | 1 | 2 ....
-         +++
-         (do symbol "true"
-             return (Bool True))  -- TT
-         +++
-         (do symbol "false"
-             return (Bool False)) -- FF
-         +++
-         (do symbol "read"
-             return Read)
-         +++
-         (do id <- token identifier
-             return (I id))
-         +++
-         (do symbol "("
-             e <- expr
-             symbol ")"
-             return e)
+factor = 
+        do n <- nat
+           return (BasicConstant (Number (toInteger n)))
+        +++
+        do symbol "true"
+           return (BasicConstant (Bool True))
+        +++
+        do symbol "false"
+           return (BasicConstant (Bool False))
+        +++
+        do symbol "read"
+           return Read
+        +++
+        do id <- token identifier
+           return (I id)
+        +++
+        do symbol "("
+           e <- expr
+           symbol ")"
+           return e
 
 -- Parse Commands
 -- Grammar: <cmd> :: skip
@@ -105,7 +154,7 @@ cmd =
        c1 <- cmdblock
        symbol "else"
        c2 <- cmdblock
-       return (IfThenElse e c1 c2)
+       return (IfThenElseCmd e c1 c2)
     +++
     do symbol "while"
        e <- expr

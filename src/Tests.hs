@@ -4,21 +4,22 @@ import Parser
 import Interpreter
 
 -- Define test cases for expressions using eparse
+-- Define test cases for expressions using eparse
 testParseExpressions :: Spec
 testParseExpressions = describe "Expression Parser Tests" $ do
   it "parses a number" $ do
     eparse "1"
-      `shouldBe` Just (Number 1)
+      `shouldBe` Just (BasicConstant (Number 1))
 
   it "parses a Boolean True value" $ do
     eparse "true"
-      `shouldBe` Just (Bool True)
-    
+      `shouldBe` Just (BasicConstant (Bool True))
+
   it "parses a Boolean False value" $ do
     eparse "false"
-      `shouldBe` Just (Bool False)
+      `shouldBe` Just (BasicConstant (Bool False))
 
-  it "parses a read value" $ do
+  it "parses a read expression" $ do
     eparse "read"
       `shouldBe` Just Read
 
@@ -28,45 +29,57 @@ testParseExpressions = describe "Expression Parser Tests" $ do
 
   it "parses a Not expression" $ do
     eparse "not true"
-      `shouldBe` Just (Not (Bool True))
+      `shouldBe` Just (UnaryOp Not (BasicConstant (Bool True)))
 
   it "parses an equality check" $ do
     eparse "1 = 1"
-      `shouldBe` Just (Equal (Number 1) (Number 1))
+      `shouldBe` Just (BinaryOp (RelationalOp Equal)
+                       (BasicConstant (Number 1)) (BasicConstant (Number 1)))
 
   it "parses a greater than check" $ do
     eparse "1 > 1"
-      `shouldBe` Just (Greater (Number 1) (Number 1))
+      `shouldBe` Just (BinaryOp (RelationalOp Greater)
+                       (BasicConstant (Number 1)) (BasicConstant (Number 1)))
 
   it "parses a lesser than check" $ do
     eparse "1 < 1"
-      `shouldBe` Just (Lesser (Number 1) (Number 1))
+      `shouldBe` Just (BinaryOp (RelationalOp Lesser)
+                       (BasicConstant (Number 1)) (BasicConstant (Number 1)))
 
   it "parses an addition" $ do
     eparse "1 + 1"
-      `shouldBe` Just (Plus (Number 1) (Number 1))
+      `shouldBe` Just (BinaryOp (ArithmeticOp Plus)
+                       (BasicConstant (Number 1)) (BasicConstant (Number 1)))
 
   it "parses a subtraction" $ do
     eparse "1 - 1"
-      `shouldBe` Just (Minus (Number 1) (Number 1))
+      `shouldBe` Just (BinaryOp (ArithmeticOp Minus)
+                       (BasicConstant (Number 1)) (BasicConstant (Number 1)))
 
   it "parses an expression with multiple operators" $ do
     eparse "5 + 3 - 2"
-      `shouldBe` Just (Plus (Number 5) (Minus (Number 3) (Number 2)))
+      `shouldBe` Just (BinaryOp (ArithmeticOp Plus)
+                       (BasicConstant (Number 5))
+                        (BinaryOp (ArithmeticOp Minus)
+                          (BasicConstant (Number 3))
+                          (BasicConstant (Number 2))))
 
   it "parses a Not expression with an equality check" $ do
-    eparse "not 1 = 1"
-      `shouldBe` Just (Not (Equal (Number 1) (Number 1)))
+    eparse "not (1 = 1)"
+      `shouldBe` Just (UnaryOp Not 
+                        (BinaryOp (RelationalOp Equal) 
+                          (BasicConstant (Number 1)) 
+                          (BasicConstant (Number 1))))
 
 testParseCommands :: Spec
 testParseCommands = describe "Commands Parser Tests" $ do
   it "parses an output command" $ do
     cparse "output 10"
-      `shouldBe` Just (Output (Number 10))
+      `shouldBe` Just (Output (BasicConstant (Number 10)))
 
   it "parses an Assignment command" $ do
     cparse "x := 10"
-      `shouldBe` Just (Assign "x" (Number 10))
+      `shouldBe` Just (Assign "x" (BasicConstant (Number 10)))
 
   it "parses a Skip command" $ do
     cparse "skip"
@@ -74,49 +87,66 @@ testParseCommands = describe "Commands Parser Tests" $ do
 
   it "parses an IfThenElse command with a Skip command" $ do
     cparse "if true then skip else skip"
-      `shouldBe` Just (IfThenElse (Bool True) Skip Skip)
+      `shouldBe` Just (IfThenElseCmd (BasicConstant (Bool True)) Skip Skip)
 
   it "parses an IfThenElse command" $ do
     cparse "if true then output 10 else output 20"
-      `shouldBe` Just (IfThenElse (Bool True)
-                       (Output (Number 10))
-                       (Output (Number 20)))
+      `shouldBe` Just (IfThenElseCmd (BasicConstant (Bool True))
+                       (Output (BasicConstant (Number 10)))
+                       (Output (BasicConstant (Number 20))))
 
   it "parses a sequence of commands with an if-then-else" $ do
     cparse "if true then {x:=10; output x;} else {x:=20; output x;}"
-      `shouldBe` Just (IfThenElse (Bool True)
-                       (Seq (Assign "x" (Number 10)) (Output (I "x")))
-                       (Seq (Assign "x" (Number 20)) (Output (I "x"))))
+      `shouldBe` Just (IfThenElseCmd (BasicConstant (Bool True))
+                       (Seq
+                        (Assign "x" (BasicConstant (Number 10)))
+                        (Output (I "x")))
+                       (Seq
+                        (Assign "x" (BasicConstant (Number 20)))
+                        (Output (I "x"))))
 
   it "parses a While command" $ do
     cparse "while true do output 10"
-      `shouldBe` Just (WhileDo (Bool True) (Output (Number 10)))
+      `shouldBe` Just (WhileDo
+                       (BasicConstant (Bool True))
+                       (Output (BasicConstant (Number 10))))
 
   it "parses a sequence of commands with a while loop" $ do
     cparse "x:=10; while true do {x:=20; output x;}"
-      `shouldBe` Just (Seq (Assign "x" (Number 10))
-                     (WhileDo (Bool True)
-                      (Seq (Assign "x" (Number 20)) (Output (I "x")))))
+      `shouldBe` Just (Seq (Assign "x" (BasicConstant (Number 10)))
+                     (WhileDo (BasicConstant (Bool True))
+                      (Seq (Assign "x" (BasicConstant (Number 20)))
+                       (Output (I "x")))))
 
   it "parses a sequence of commands" $ do
     cparse "output 10; output 20"
-      `shouldBe` Just (Seq (Output (Number 10)) (Output (Number 20)))
+      `shouldBe` Just (Seq
+                       (Output (BasicConstant (Number 10)))
+                       (Output (BasicConstant (Number 20))))
 
   it "parses a sequence of commands with ; at the end" $ do
     cparse "output 10; output 20;"
-      `shouldBe` Just (Seq (Output (Number 10)) (Output (Number 20)))
+      `shouldBe` Just (Seq
+                       (Output (BasicConstant (Number 10)))
+                       (Output (BasicConstant (Number 20))))
 
   it "parses a sequence of commands with an assignment" $ do
     cparse "x := 10; output x"
-      `shouldBe` Just (Seq (Assign "x" (Number 10)) (Output (I "x")))
+      `shouldBe` Just (Seq
+                       (Assign "x" (BasicConstant (Number 10)))
+                       (Output (I "x")))
 
   it "parses the test case from Gordon's example" $ do
       cparse "sum:=0; x:=read; while not (x=1) do sum:=sum+x; x:=read; output sum"
-      `shouldBe` Just (Seq (Assign "sum" (Number 0))
-                     (Seq (Assign "x" Read)
-                      (Seq (WhileDo (Not (Equal (I "x") (Number 1)))
-                            (Assign "sum" (Plus (I "sum") (I "x"))))
-                        (Seq (Assign "x" Read) (Output (I "sum"))))))
+      `shouldBe` Just (Seq
+                       (Assign "sum" (BasicConstant (Number 0)))
+                       (Seq
+                        (Assign "x" Read)
+                        (Seq
+                         (WhileDo (UnaryOp Not (BinaryOp (RelationalOp Equal) ( I "x") (BasicConstant (Number 1))))
+                            (Assign "sum" (BinaryOp (ArithmeticOp Plus) (I "sum") (I "x"))))
+                            (Seq
+                            (Assign "x" Read) (Output (I "sum"))))))
 
 
 testInterpreter :: Spec
