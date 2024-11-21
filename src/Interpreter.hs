@@ -56,6 +56,7 @@ printState (m, i, o) = display m ++ "Input: " ++ show i ++ "Output: " ++ show o
 -- Semantic function definitions for Exp and Cmd
 data ExpVal = OK Value State | Error String
 data CmdVal = OKc State | Errorc String
+data StmtVal = ExpVal | CmdVal
 exp_semantics :: Exp -> State -> ExpVal
 cmd_semantics :: Cmd -> State -> CmdVal
 
@@ -149,6 +150,24 @@ cmd_semantics (Seq cmd1 cmd2) s =
     OKc s1 -> cmd_semantics cmd2 s1
     Errorc msg -> Errorc msg
 
+-- Semantic function for the statements     
+stmt_semantics :: StmtSeq -> State -> CmdVal
+stmt_semantics (SingleStmt stmt) s = 
+  case stmt of 
+    (Cmd cmd) -> cmd_semantics cmd s
+    (Exp exp) -> case exp_semantics exp s of
+                   OK _ s' -> OKc s'
+                   Error msg -> Errorc msg
+
+stmt_semantics (MultipleStmt stmt rest) s =
+  case stmt of 
+    (Cmd cmd) -> case cmd_semantics cmd s of
+                   OKc s' -> stmt_semantics rest s'
+                   Errorc msg -> Errorc msg
+    (Exp exp) -> case exp_semantics exp s of
+                   OK _ s' -> stmt_semantics rest s'
+                   Error msg -> Errorc msg
+
 -- Run the program with the given input
 run :: String -> [Value] -> [Value]
 run program input = 
@@ -157,3 +176,14 @@ run program input =
       case cmd_semantics parsed_program (emptymem, input, []) of
         OKc (_, _, o) -> o
         Errorc msg -> [ERROR]
+    Nothing -> [ERROR]  -- Return ERROR if parsing fails
+
+-- Run statements
+runstmt :: String -> [Value] -> [Value]
+runstmt program input = 
+  case sparse program of
+    Just parsed_program -> 
+      case stmt_semantics parsed_program (emptymem, input, []) of
+        OKc (_, _, o) -> o
+        Errorc msg -> [ERROR]
+    Nothing -> [ERROR]  -- Return ERROR if parsing fails

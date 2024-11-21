@@ -56,3 +56,12 @@
       _ -> Unbound
   #+end_src
 
+
+- Statements added
+  + Statements = <Cmd> | <Exp>
+  + According to the SMALL language specification, there are a few
+    expressions that behave like commands, hence we need to evaluate
+    them as well. But the Tiny implememtation can't be extended to
+    support SMALL.
+  + One other way is to treating expressions as CMDs, it would return
+    the value but not change the memory.

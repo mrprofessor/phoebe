@@ -1,6 +1,7 @@
+{-# LANGUAGE BlockArguments #-}
+
 module Parser where
 import Parsing
-
 
 -- Identifier
 type Ide = String
@@ -35,7 +36,6 @@ data Exp
   | IfThenElseExp Exp Exp Exp              -- "if E then E1 else E2"
   deriving (Eq, Show)
 
-
 -- Commands
 data Cmd
   = Skip                                   -- The skip command
@@ -52,6 +52,18 @@ data Dec
   | Var Ide Exp                            -- Variable "var I = E"
   | Fun Ide [Ide] Cmd                      -- Function "fun I (I1, ..., In) C"
   | Proc Ide [Ide] Cmd                     -- Procedure "proc I (I1, ..., In) C
+
+-- Statements
+data Stmt
+  = Exp Exp                                -- Expression
+  | Cmd Cmd                                -- Command
+  deriving (Eq, Show)
+
+-- Statement Sequences
+data StmtSeq
+  = SingleStmt Stmt                        -- Single statement
+  | MultipleStmt Stmt StmtSeq                   -- Sequence of statements
+  deriving (Eq, Show)
 
 
 -- GRAMMAR: <expr> ::= <term> + <expr> | <term> = <expr> | <term>
@@ -170,14 +182,16 @@ cmd =
 -- Parse sequences of commands separately to prevent infinite recursion
 -- Grammar <cmdseq> :: <cmd> ; <cmd> | <cmd> | <cmd> ;
 cmdseq :: Parser Cmd
-cmdseq = do c1 <- cmd
-            (do symbol ";"
-                (do c2 <- cmdseq
-                    return (Seq c1 c2)
-                 +++
-                 return c1)  -- Optional trailing semicolon
-             +++
-             return c1)      -- No semicolon
+cmdseq = do
+  c1 <- cmd
+  (do symbol ";"
+      c2 <- cmdseq
+      return (Seq c1 c2)
+   +++
+   do symbol ";"                           -- Optional trailing semicolon
+      return c1
+   +++
+   return c1)                              -- No semicolon
   
 -- Parse a block of commands enclosed in curly braces
 -- Grammar: <cmdblock> ::= { <cmdseq> }
@@ -187,6 +201,28 @@ cmdblock = do symbol "{"
               symbol "}"
               return c
            +++ cmd
+
+-- Parse Statements (Statements are either commands or expressions)
+-- Grammar: <Cmd> | <Exp>
+stmt :: Parser Stmt
+stmt =
+  do cmd <- cmd
+     return (Cmd cmd)
+  +++
+  do exp <- expr
+     return (Exp exp)
+
+-- Parse Statement Sequences
+stmtSeq = do 
+  s1 <- stmt
+  (do symbol ";"
+      rest <- stmtSeq
+      return (MultipleStmt s1 rest)
+   +++
+   do symbol ";"
+      return (SingleStmt s1)
+   +++
+   return (SingleStmt s1))
 
 -- Parse Expressions
 eparse :: String -> Maybe Exp
@@ -202,3 +238,10 @@ cparse xs = case (parse cmdseq xs) of
               [(_, out)] -> Nothing
               []         -> Nothing
 
+-- Parse Statements
+sparse :: String -> Maybe StmtSeq
+sparse xs = case (parse stmtSeq xs) of
+              [(n, [])]  -> Just n
+              [(_, out)] -> Nothing
+              []         -> Nothing
+  
