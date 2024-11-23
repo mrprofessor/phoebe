@@ -14,7 +14,7 @@ data MemVal = Stored Value
   | Unbound
   deriving Show
 
--- Custome Ord class for data Value
+-- Custom Ord class for data Value
 instance Ord Value where
   compare (Numeric x) (Numeric y) = compare x y
   compare (Boolean x) (Boolean y) = compare x y
@@ -49,7 +49,7 @@ search memory ide = case Map.lookup ide memory of
   Just (Stored v) -> Stored v
   _ -> Unbound
 
-  -- Print the State
+-- Print the State
 printState :: State -> String
 printState (m, i, o) = display m ++ "Input: " ++ show i ++ "Output: " ++ show o
 

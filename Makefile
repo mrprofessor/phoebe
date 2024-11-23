@@ -1,5 +1,8 @@
 .PHONY: all test build clean repl parser interpreter 
 
+micro:
+	ghci -isrc src/micro.hs -package containers -e repl
+
 test:
 	ghci -isrc src/Tests.hs -package containers -e main
 
