@@ -1,7 +1,4 @@
-.PHONY: all test build clean repl parser interpreter 
-
-micro:
-	ghci -isrc src/micro.hs -package containers -e repl
+.PHONY: all test build clean parser interpreter 
 
 test:
 	ghci -isrc src/Tests.hs -package containers -e main
@@ -12,11 +9,9 @@ build:
 clean:
 	rm -f bin/*
 
-repl:
-	ghci -isrc src/Repl.hs -package containers -e main
 
 parser:
-	ghci -isrc src/Parser.hs -package containers
+	ghci -isrc src/AST.hs -package containers
 
 interpreter:
 	ghci -isrc src/Interpreter.hs -package containers
