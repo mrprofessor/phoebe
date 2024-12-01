@@ -1,147 +1,268 @@
--- Tests.hs
 import Test.Hspec
 import AST
 
+-- Equality Clauses for test
 instance Eq ParsedResult where
   (ParseOk p1) == (ParseOk p2) = show p1 == show p2
   (ParseError e1) == (ParseError e2) = e1 == e2
   _ == _ = False
 
-data TestCase = TestCase 
-  {
-    description :: String,
-    input :: String,
-    expected :: ParsedResult
+instance Eq Ans where
+  Stop (_, _, _, _, output1) == Stop (_, _, _, _, output2) = output1 == output2
+  ErrorState msg1 == ErrorState msg2 = msg1 == msg2
+  _ == _ = False
+
+
+data TestType = ParserTest | InterpreterTest
+
+data TestCase = TestCase
+  { description :: String
+  , testType :: TestType
+  , programStr :: String
+  , input :: Maybe [Value]
+  , expected :: Either ParsedResult Ans
   }
 
 testCases :: [TestCase]
-testCases = [
-    -- Success cases
-    TestCase 
-      "variable declaration with output"
+testCases =
+  [
+    TestCase
+      "variable declaration with output (Parser)"
+      ParserTest
       (unlines [
-        "var x = 42;",
-        "output x"
+        "program",
+        "  begin",
+        "    var x = 42;",
+        "    output x;",
+        "  end"
       ])
-      (ParseOk $ Program 
-        (Variable "x" (Number 42))
-        (Output (VarRef "x"))),
+      Nothing
+      (Left $ ParseOk $ Program 
+        (BeginEnd 
+          (Variable "x" (Number 42)) 
+          (Output (Identifier "x")))),
 
     TestCase
-      "constant declaration with output"
+      "constant declaration with output (Parser)"
+      ParserTest
       (unlines [
-        "const x = 10;",
-        "output x"
+        "program",
+        "  begin",
+        "    const x = 10;",
+        "    output x;",
+        "  end"
       ])
-      (ParseOk $ Program
-        (Constant "x" (Number 10))
-        (Output (VarRef "x"))),
+      Nothing
+      (Left $ ParseOk $ Program 
+        (BeginEnd 
+          (Constant "x" (Number 10))
+          (Output (Identifier "x")))),
 
     TestCase
-      "procedure declaration with call"
+      "procedure declaration with call (Parser)"
+      ParserTest
       (unlines [
-        "proc print (x), output x;",
-        "print(10)"
+        "program",
+        "  begin",
+        "    proc print (x), output x;",
+        "    print(10);",
+        "  end"
       ])
-      (ParseOk $ Program
-        (Procedure "print" ["x"] 
-          (Output (VarRef "x")))
-        (CallProc "print" [Number 10])),
+      Nothing
+      (Left $ ParseOk $ Program 
+        (BeginEnd 
+          (Procedure "print" ["x"] (Output (Identifier "x")))
+          (CallProc "print" [Number 10]))),
 
     TestCase
-      "function declaration with call"
+      "function declaration with call (Parser)"
+      ParserTest
       (unlines [
-        "fun inc (x), x+1;",
-        "output inc!(10)"
+        "program",
+        "  begin",
+        "    fun inc (x), x+1;",
+        "    output inc!(10);",
+        "  end"
       ])
-      (ParseOk $ Program
-        (Function "inc" ["x"] 
-          (BinOp "+" (VarRef "x") (Number 1)))
-        (Output (CallFun "inc" [Number 10]))),
+      Nothing
+      (Left $ ParseOk $ Program 
+        (BeginEnd 
+          (Function "inc" ["x"] 
+            (BinOp "+" (Identifier "x") (Number 1)))
+          (Output (CallFun "inc" [Number 10])))),
 
-    TestCase 
-        "factorial function with call"
-        (unlines [
-            "fun fact(n),",
-            "if n == 0 then 1",
-            "else n * fact!(n-1);",
-            "output fact!(10)"
-        ])
-        (ParseOk $ Program
-            (Function "fact" ["n"] 
-                (IfExp 
-                    (BinOp "==" (VarRef "n") (Number 0))
-                    (Number 1)
-                    (BinOp "*" 
-                        (VarRef "n") 
-                        (CallFun "fact" [BinOp "-" (VarRef "n") (Number 1)])
-                    )
-                ))
-            (Output (CallFun "fact" [Number 10]))
-        ),
+    TestCase
+      "factorial function with call (Parser)"
+      ParserTest
+      (unlines [
+        "program",
+        "  begin",
+        "    fun fact(n),",
+        "    if n == 0 then 1",
+        "    else n * fact!(n-1);",
+        "    output fact!(10);",
+        "  end"
+      ])
+      Nothing
+      (Left $ ParseOk $ Program 
+        (BeginEnd 
+          (Function "fact" ["n"] 
+            (IfExp 
+              (BinOp "==" (Identifier "n") (Number 0))
+              (Number 1)
+              (BinOp "*" 
+                (Identifier "n") 
+                (CallFun "fact" [BinOp "-" (Identifier "n") (Number 1)]))))
+          (Output (CallFun "fact" [Number 10])))),
+
+    TestCase
+      "missing commands (Parser)"
+      ParserTest
+      (unlines [
+        "program",
+        "  begin",
+        "    var x = 10;",
+        "  end"
+      ])
+      Nothing
+      (Left $ ParseError "Invalid input"),
+
+    TestCase
+      "missing declarations (Parser)"
+      ParserTest
+      (unlines [
+        "program",
+        "  begin",
+        "    output 100;",
+        "  end"
+      ])
+      Nothing
+      (Left $ ParseError "Invalid input"),
+
+    TestCase
+      "missing variable declaration keyword (Parser)"
+      ParserTest
+      (unlines [
+        "program",
+        "  begin",
+        "    x = 42;",
+        "    output x;",
+        "  end"
+      ])
+      Nothing
+      (Left $ ParseError "Invalid input"),
+
+    TestCase
+      "missing semicolon (Parser)"
+      ParserTest
+      (unlines [
+        "program",
+        "  begin",
+        "    var x = 42",  -- no semicolon
+        "    var y = 10;",
+        "    output x;",
+        "  end"
+      ])
+      Nothing
+      (Left $ ParseError "Invalid input"),
+
+    TestCase
+      "incorrect procedure syntax (Parser)"
+      ParserTest
+      (unlines [
+        "program",
+        "  begin",
+        "    proc badProc x,",  -- missing parentheses
+        "    output x;",
+        "    output 42;",
+        "  end"
+      ])
+      Nothing
+      (Left $ ParseError "Invalid input"),
+
+    -- Interpreter Tests
+    TestCase
+      "variable declaration and output (Interpreter)"
+      InterpreterTest
+      (unlines [
+        "program",
+        "  begin",
+        "    var x = 42;",
+        "    output x;",
+        "  end"
+      ])
+      (Just [])
+      (Right $ Stop (defaultEnv, defaultStore, 1, [], [Numeric 42])),
+
+    TestCase
+      "constant declaration and output (Interpreter)"
+      InterpreterTest
+      (unlines [
+        "program",
+        "  begin",
+        "    const x = 100;",
+        "    output x;",
+        "  end"
+      ])
+      (Just [])
+      (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 100])),
+
+    TestCase
+      "Function declaration and assignment (Interpreter)"
+      InterpreterTest
+      (unlines [
+        "program",
+        "  begin",
+        "    fun add(x,y), x+y;",
+        "    var x = 1;",
+        "    var y = 2;",
+        "    var z = add!(1,2);",
+        "    output z;",
+        "  end"
+      ])
+      (Just [])
+      (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 3])),
 
     -- Error cases
     TestCase
-      "missing commands"
+      "accessing undefined variable (Interpreter)"
+      InterpreterTest
       (unlines [
-        "var x = 10;",
-        "var y = 20;"
+        "program",
+        "  begin",
+        "    var y = 10;",
+        "    output x;",
+        "  end"
       ])
-      (ParseError "Invalid input"),
+      (Just [])
+      (Right $ ErrorState "Undefined identifier: x"),
 
     TestCase
-      "missing declarations"
+      "division by zero (Interpreter)"
+      InterpreterTest
       (unlines [
-        "output 100;"
+        "program",
+        "  begin",
+        "    var x = 42;",
+        "    output x / 0;",
+        "  end"
       ])
-      (ParseError "Invalid input"),
-
-    TestCase
-      "missing variable declaration keyword"
-      (unlines [
-        "x = 42;",
-        "output x"
-      ])
-      (ParseError "Invalid input"),
-
-    TestCase
-      "missing semicolon"
-      (unlines [
-        "var x = 42",  -- note: no semicolon here
-        "var y = 10;",
-        "output x"
-      ])
-      (ParseError "Invalid input"),
-
-    TestCase
-      "incorrect procedure syntax"
-      (unlines [
-        "proc badProc x,",  -- missing parentheses
-        "  output x;",
-        "  output 42"
-      ])
-      (ParseError "Invalid input")
+      (Just [])
+      (Right $ ErrorState "Division by zero")
   ]
 
-testParser :: Spec
-testParser = describe "Phoebe Language Parser" $ do
-  describe "Success Cases" $
-    mapM_ testSuccess $ filter isSuccess testCases
-  
-  describe "Error Cases" $
-    mapM_ testError $ filter (not . isSuccess) testCases
+testSuite :: Spec
+testSuite = describe "Phoebe Language Tests" $ do
+  mapM_ runTest testCases
   where
-    testSuccess TestCase{description, input, expected} =
-      it description $
-        sparse input `shouldBe` expected
-    
-    testError TestCase{description, input, expected} =
-      it description $
-        sparse input `shouldBe` expected
-
-isSuccess :: TestCase -> Bool
-isSuccess TestCase{expected = ParseOk _} = True
-isSuccess _ = False
+    runTest TestCase{description, testType, programStr, input, expected} =
+      it description $ case testType of
+        ParserTest -> sparse programStr `shouldBe`
+                      either id (error "Expected ParsedResult") expected
+        InterpreterTest -> case input of
+          Just inp -> run programStr inp `shouldBe`
+                      either (error "Expected Ans") id expected
+          Nothing -> error "Interpreter test requires input"
 
 main :: IO ()
-main = hspec testParser
+main = hspec testSuite
