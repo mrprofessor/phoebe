@@ -1,9 +1,8 @@
 module AST where
 import Parsing
-import Data.Map (Map)
-import qualified Data.Map as Map
 import System.IO (hFlush, stdout)
-import Debug.Trace (trace)
+import Debug.Trace (trace) -- For debugging
+import System.Environment (getArgs)
 
 type Ide = String
 
@@ -118,10 +117,10 @@ cmd =
   +++
   do symbol "begin"
      decs <- decSeq
-     symbol ";"                -- Mandatory ; after declaration 
-     c <- cmd
+     symbol ";"                     -- Mandatory ; after declaration
+     cmds <- cmdSeq
      symbol "end"
-     return (BeginEnd decs c)
+     return (BeginEnd decs cmds)
   +++
   do symbol "while"
      cond <- expr
@@ -355,18 +354,21 @@ exp_semantics (Identifier ide) env k state@(env', store, nl, input, output) =
     _ -> ErrorState $ "Unexpected environment value for: " ++ ide
 
 -- E[E1(E2)] r k = E[E1] r; Fun?λf.E[E2] r; f; k
--- FIXME : I am not evaluating E1(E2), Instead I am checking if E1 == Function 
-exp_semantics (CallFun funName args) env k state@(currentEnv, _, _, _, _) =
+exp_semantics (CallFun funName args) env k state =
   case env funName of
     FunDef paramNames body closureEnv ->
-      -- Evaluate the args
-      evalArgs args currentEnv state (\argVals state'' ->
-        -- Extend the env with the args and call the function body
-        let extendedEnv =
-              foldl (\e (param, argVal) -> extendEnv param (ConstVal argVal) e)
+      if length paramNames /= length args then
+        ErrorState $ "Argument count mismatch for function: " ++ funName
+      else
+        -- Evaluate the args
+        evalArgs args env state (\argVals state' ->
+          -- Extend the env with the args and call the function body
+          let extendedEnv = foldl (\e (param, argVal) ->
+                extendEnv param (ConstVal argVal) e)
                 closureEnv
                 (zip paramNames argVals)
-        in exp_semantics body extendedEnv k state''
+          in
+            exp_semantics body extendedEnv k state'
       )
     _ -> ErrorState $ funName ++ " is not a Function."
 
@@ -541,7 +543,8 @@ dec_semantics (Procedure ide params body) env k state =
 dec_semantics (Function ide params body) env k state =
   let funcDef = FunDef params body env
       extendedEnv = extendEnv ide funcDef env
-  in k extendedEnv state
+  in
+    k extendedEnv state
 
 -- (D5) Sequence of declarations:
 -- D[D1;D2] r u = D[D1] r λr₁ . D[D2] r[r1] λr2 . u(r1[r2])
@@ -556,9 +559,10 @@ dec_semantics (DecSeq d1 d2) env k state =
 
 executeProgram :: Dec -> Com -> State -> Ans
 executeProgram decls cmds initialState =
-    dec_semantics decls defaultEnv (\extendedEnv ->
-        com_semantics cmds extendedEnv Stop
-    ) initialState
+  dec_semantics decls defaultEnv (\extendedEnv ->
+    com_semantics cmds extendedEnv Stop
+  ) initialState
+
 
 run :: String -> [Value] -> Ans
 run program input =
@@ -578,4 +582,22 @@ instance Show EnvVal where
   show (ConstVal val) = "ConstVal " ++ show val
   show (ProcDef params _ _) = "ProcDef with params " ++ show params
   show (FunDef params _ _) = "FunDef with params " ++ show params
-  show Unbound = "Unbound"     
+  show Unbound = "Unbound"
+
+-- Helper function to display environment
+showEnv :: [Ide] -> Env -> String
+showEnv keys env = unlines [key ++ " -> " ++ show (env key) | key <- keys]
+
+
+-- Main (Read from file and run)
+-- ----------------------------------------------------------------------------
+
+main :: IO ()
+main = do
+  args <- getArgs
+  case args of
+    [fileName] -> do
+      contents <- readFile fileName
+      let results = run contents []
+      putStrLn $ show results
+    _ -> putStrLn "Usage: Program FileName"

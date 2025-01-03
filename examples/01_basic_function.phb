@@ -1,0 +1,9 @@
+program 
+  begin
+    fun add (x,y), x+y;
+    var x = 10;
+    var y = 5;
+    var z = add!(x, y);
+    output z;
+  end
+

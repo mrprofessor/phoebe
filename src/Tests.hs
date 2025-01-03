@@ -220,6 +220,22 @@ testCases =
         "    output z;",
         "  end"
       ])
+    (Just [])
+      (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 3])),
+
+    TestCase
+      "Function declaration and dynamic binding (Interpreter)"
+      InterpreterTest
+      (unlines [
+        "program",
+        "  begin",
+        "    fun add(x,y), x+y;",
+        "    var x = 1;",
+        "    var y = 2;",
+        "    var z = add!(x,y);",
+        "    output z;",
+        "  end"
+      ])
       (Just [])
       (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 3])),
 
@@ -264,5 +280,5 @@ testSuite = describe "Phoebe Language Tests" $ do
                       either (error "Expected Ans") id expected
           Nothing -> error "Interpreter test requires input"
 
-main :: IO ()
-main = hspec testSuite
+runTests :: IO ()
+runTests = hspec testSuite
