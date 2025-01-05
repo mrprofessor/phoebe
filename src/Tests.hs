@@ -1,5 +1,5 @@
 import Test.Hspec
-import AST
+import Interpreter
 
 -- Equality Clauses for test
 instance Eq ParsedResult where

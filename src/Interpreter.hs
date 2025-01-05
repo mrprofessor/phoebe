@@ -1,4 +1,4 @@
-module AST where
+module Interpreter where
 import Parsing
 import System.IO (hFlush, stdout)
 import Debug.Trace (trace) -- For debugging
