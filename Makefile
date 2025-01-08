@@ -1,19 +1,22 @@
 .PHONY: all test parser interpreter run build clean
 
+SRC_DIRS := src src/lib
+GHC_FLAGS := $(foreach d, $(SRC_DIRS), -i$d) -package containers
+
 test:
-	ghci -isrc src/Tests.hs -package containers -e runTests
+	ghci $(GHC_FLAGS) src/Tests.hs -e runTests
 
 parser:
-	ghci -isrc src/Parser.hs -package containers
+	ghci $(GHC_FLAGS) src/Parser.hs
 
 interpreter:
-	ghci -isrc src/Interpreter.hs -package containers
+	ghci $(GHC_FLAGS) src/Interpreter.hs
 
 run:
-	ghci -isrc src/Interpreter.hs -package containers
+	ghci $(GHC_FLAGS) src/Interpreter.hs
 
 build:
-	ghc -o bin/interpreter src/Interpreter.hs -package containers
+	ghc -o bin/interpreter src/Interpreter.hs
 
 clean:
 	rm -f bin/*

@@ -92,12 +92,42 @@ testCases =
           (Output (CallFun "inc" [Number 10])))),
 
     TestCase
+      "IfElseThen Command (Parser)"
+      ParserTest
+      (unlines [
+          "program",
+          "  begin",
+          "    var x = read;",
+          "    if (x/2) == 1 then output true",
+          "    else",
+          "      begin",
+          "        var x = x + 1;",
+          "        output x",
+          "      end",
+          "    end"
+      ])
+      Nothing
+      (Left $ ParseOk $ Program 
+      (BeginEnd 
+          (Variable "x" Read)
+          (IfCom
+          (BinOp "==" 
+              (BinOp "/" (Identifier "x") (Number 2)) 
+              (Number 1))
+          (Output (Bool True))
+          (BeginEnd
+              (Variable "x" 
+              (BinOp "+" (Identifier "x") (Number 1)))
+              (Output (Identifier "x")))))),
+
+
+    TestCase
       "factorial function with call (Parser)"
       ParserTest
       (unlines [
         "program",
         "  begin",
-        "    fun fact(n),",
+        "    rec fun fact(n),",
         "    if n == 0 then 1",
         "    else n * fact!(n-1);",
         "    output fact!(10)",
@@ -106,7 +136,7 @@ testCases =
       Nothing
       (Left $ ParseOk $ Program 
         (BeginEnd 
-          (Function "fact" ["n"] 
+          (RecFunction "fact" ["n"] 
             (IfExp 
               (BinOp "==" (Identifier "n") (Number 0))
               (Number 1)
@@ -116,7 +146,7 @@ testCases =
           (Output (CallFun "fact" [Number 10])))),
 
     TestCase
-      "missing commands (Parser)"
+      "missing commands in BeginEnd (Parser)"
       ParserTest
       (unlines [
         "program",
@@ -128,7 +158,7 @@ testCases =
       (Left $ ParseError "Invalid input"),
 
     TestCase
-      "missing declarations (Parser)"
+      "missing declarations in BeginEnd (Parser)"
       ParserTest
       (unlines [
         "program",
@@ -245,7 +275,7 @@ testCases =
       (unlines [
         "program",
         "  begin",
-        "    fun fact(n),",
+        "    rec fun fact(n),",
         "    if n == 0 then 1",
         "    else n * fact!(n-1);",
         "    output fact!(5)",

@@ -36,8 +36,10 @@ data Com
 data Dec
   = Constant Ide Exp
   | Variable Ide Exp
-  | Procedure Ide [Ide] Com
-  | Function Ide [Ide] Exp
+  | Procedure Ide [Ide] Com           -- Regular procedure
+  | RecProcedure Ide [Ide] Com        -- Recursive procedure
+  | Function Ide [Ide] Exp            -- Regular function
+  | RecFunction Ide [Ide] Exp         -- Recursive function
   | DecSeq Dec Dec
   deriving Show
 
@@ -192,6 +194,26 @@ dec =
      symbol ","
      body <- expr          -- Functions return expressions, not commands
      return (Function name params body)
+  +++
+  do symbol "rec"          -- Recursive procedure
+     symbol "proc"
+     name <- token identifier
+     symbol "("
+     params <- identifier `sepby` (symbol ",")
+     symbol ")"
+     symbol ","
+     body <- cmd
+     return (RecProcedure name params body)
+  +++
+  do symbol "rec"          -- Recursive function
+     symbol "fun"
+     name <- token identifier
+     symbol "("
+     params <- identifier `sepby` (symbol ",")
+     symbol ")"
+     symbol ","
+     body <- expr
+     return (RecFunction name params body)
 
 -- Sequence of Declarations
 decSeq :: Parser Dec
@@ -533,6 +555,13 @@ dec_semantics (Procedure ide params body) env k state =
       extendedEnv = extendEnv ide procDef env
   in k extendedEnv state
 
+-- Recursive Procedure
+dec_semantics (RecProcedure ide params body) env k state =
+  let procDef = ProcDef params body env'
+      env' = extendEnv ide procDef env      -- lazy recursive binding of env'
+  in k env' state
+
+
 -- (D4) Function declaration:
 -- D[fun I(I1); E] r u = u((λk e . E[E] r[e/I1] k)/I)
 dec_semantics (Function ide params body) env k state =
@@ -540,6 +569,13 @@ dec_semantics (Function ide params body) env k state =
       extendedEnv = extendEnv ide funcDef env
   in
     k extendedEnv state
+
+-- Recursive Function
+dec_semantics (RecFunction ide params body) env k state =
+    let funcDef = FunDef params body env'
+        env' = extendEnv ide funcDef env
+    in
+      k env' state
 
 -- (D5) Sequence of declarations:
 -- D[D1;D2] r u = D[D1] r λr₁ . D[D2] r[r1] λr2 . u(r1[r2])
@@ -562,8 +598,8 @@ executeProgram decls cmds initialState =
 run :: String -> [Value] -> Ans
 run program input =
     case sparse program of
-      ParseOk (Program (BeginEnd decls cmds)) ->
-        executeProgram decls cmds (initState input)
+      ParseOk (Program cmd) ->
+        com_semantics cmd defaultEnv Stop (initState input)
       ParseError msg -> ErrorState ("Parser Error: " ++ msg)
 
 instance Show Ans where
