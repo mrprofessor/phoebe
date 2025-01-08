@@ -117,7 +117,7 @@ cmd =
   +++
   do symbol "begin"
      decs <- decSeq
-     symbol ";"                     -- Mandatory ; after declaration
+     symbol ";"                       -- Mandatory ; after declarations
      cmds <- cmdSeq
      symbol "end"
      return (BeginEnd decs cmds)
@@ -154,10 +154,10 @@ cmdSeq =
      (do symbol ";"
          rest <- cmdSeq
          return (ComSeq c1 rest)
-      +++
-      do symbol ";"
-         return c1
-      +++
+      -- +++                          -- Make ; optional for the last command
+      -- do symbol ";"
+      --    return c1)
+      +++ 
       return c1)
 
 -- Declaration parsers
@@ -200,25 +200,20 @@ decSeq =
      (do symbol ";"
          rest <- decSeq
          return (DecSeq d1 rest)
-      +++
-      do symbol ";"
-         return d1
+      -- +++                          -- Make ; optional for the last dec
+      -- do symbol ";"
+      --    return d1
       +++
       return d1)
 
 -- Program parser
+-- Program ::= program C
 program :: Parser Program
 program =
   do symbol "program"
-     symbol "begin"
-     decs <- decSeq
-     cmds <- cmdSeq
-     symbol "end"
-     return (Program (BeginEnd decs cmds))
--- program =
---   do dec <- decSeq
---      cmd <- cmd
---      return (Program dec cmd)
+     c <- cmd
+     return (Program c)
+
 
 -- Main parse function
 sparse :: String -> ParsedResult

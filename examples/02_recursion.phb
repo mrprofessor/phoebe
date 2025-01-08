@@ -1,0 +1,8 @@
+program
+  begin
+    proc copy(n);
+    if n = 0 then output 0 else (output read; copy(n-1));
+
+    copy(10);
+  end
+

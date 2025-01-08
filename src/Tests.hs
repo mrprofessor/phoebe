@@ -33,7 +33,7 @@ testCases =
         "program",
         "  begin",
         "    var x = 42;",
-        "    output x;",
+        "    output x",
         "  end"
       ])
       Nothing
@@ -49,7 +49,7 @@ testCases =
         "program",
         "  begin",
         "    const x = 10;",
-        "    output x;",
+        "    output x",
         "  end"
       ])
       Nothing
@@ -65,7 +65,7 @@ testCases =
         "program",
         "  begin",
         "    proc print (x), output x;",
-        "    print(10);",
+        "    print(10)",
         "  end"
       ])
       Nothing
@@ -81,7 +81,7 @@ testCases =
         "program",
         "  begin",
         "    fun inc (x), x+1;",
-        "    output inc!(10);",
+        "    output inc!(10)",
         "  end"
       ])
       Nothing
@@ -100,7 +100,7 @@ testCases =
         "    fun fact(n),",
         "    if n == 0 then 1",
         "    else n * fact!(n-1);",
-        "    output fact!(10);",
+        "    output fact!(10)",
         "  end"
       ])
       Nothing
@@ -121,7 +121,7 @@ testCases =
       (unlines [
         "program",
         "  begin",
-        "    var x = 10;",
+        "    var x = 10",
         "  end"
       ])
       Nothing
@@ -133,7 +133,7 @@ testCases =
       (unlines [
         "program",
         "  begin",
-        "    output 100;",
+        "    output 100",
         "  end"
       ])
       Nothing
@@ -146,7 +146,7 @@ testCases =
         "program",
         "  begin",
         "    x = 42;",
-        "    output x;",
+        "    output x",
         "  end"
       ])
       Nothing
@@ -160,7 +160,7 @@ testCases =
         "  begin",
         "    var x = 42",  -- no semicolon
         "    var y = 10;",
-        "    output x;",
+        "    output x",
         "  end"
       ])
       Nothing
@@ -174,7 +174,7 @@ testCases =
         "  begin",
         "    proc badProc x,",  -- missing parentheses
         "    output x;",
-        "    output 42;",
+        "    output 42",
         "  end"
       ])
       Nothing
@@ -188,7 +188,7 @@ testCases =
         "program",
         "  begin",
         "    var x = 42;",
-        "    output x;",
+        "    output x",
         "  end"
       ])
       (Just [])
@@ -201,7 +201,7 @@ testCases =
         "program",
         "  begin",
         "    const x = 100;",
-        "    output x;",
+        "    output x",
         "  end"
       ])
       (Just [])
@@ -217,7 +217,7 @@ testCases =
         "    var x = 1;",
         "    var y = 2;",
         "    var z = add!(1,2);",
-        "    output z;",
+        "    output z",
         "  end"
       ])
     (Just [])
@@ -233,11 +233,26 @@ testCases =
         "    var x = 1;",
         "    var y = 2;",
         "    var z = add!(x,y);",
-        "    output z;",
+        "    output z",
         "  end"
       ])
       (Just [])
       (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 3])),
+
+    TestCase
+      "factorial function with call (Interpreter)"
+      InterpreterTest
+      (unlines [
+        "program",
+        "  begin",
+        "    fun fact(n),",
+        "    if n == 0 then 1",
+        "    else n * fact!(n-1);",
+        "    output fact!(5)",
+        "  end"
+      ])
+      (Just [])
+      (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 120])),
 
     -- Error cases
     TestCase
@@ -247,7 +262,7 @@ testCases =
         "program",
         "  begin",
         "    var y = 10;",
-        "    output x;",
+        "    output x",
         "  end"
       ])
       (Just [])
@@ -260,7 +275,7 @@ testCases =
         "program",
         "  begin",
         "    var x = 42;",
-        "    output x / 0;",
+        "    output x / 0",
         "  end"
       ])
       (Just [])

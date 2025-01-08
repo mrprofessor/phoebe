@@ -6,4 +6,3 @@ program
     var z = add!(x, y);
     output z;
   end
-
