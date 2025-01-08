@@ -16,7 +16,7 @@ run:
 	ghci $(GHC_FLAGS) src/Interpreter.hs
 
 build:
-	ghc -o bin/interpreter src/Interpreter.hs
+	ghc $(GHC_FLAGS) -o bin/phoebe src/Main.hs
 
 clean:
 	rm -f bin/*

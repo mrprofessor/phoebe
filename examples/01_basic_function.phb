@@ -4,5 +4,5 @@ program
     var x = 10;
     var y = 5;
     var z = add!(x, y);
-    output z;
+    output z
   end

@@ -4,6 +4,10 @@ import System.IO (hFlush, stdout)
 import Debug.Trace (trace) -- For debugging
 import System.Environment (getArgs)
 
+-------------------------------------------------------------------------------
+-- PARSER
+-------------------------------------------------------------------------------
+
 type Ide = String
 
 -- P ::= program C
@@ -296,6 +300,17 @@ data Ans
   | ErrorState String            -- Represents errors in execution
   | Result [Value] State         -- Result with continuation (list of R-values)
 
+-- Mix Functions/Procedure type
+type Mix = Env -> Env -> Env
+
+-- λ(r,r') . r
+staticMix :: Mix
+staticMix declEnv callEnv = declEnv
+
+-- λ(r,r') . r'
+dynamicMix :: Mix
+dynamicMix declEnv callEnv = callEnv
+
 -- Continuations
 -- ----------------------------------------------------------------------------
 
@@ -339,6 +354,16 @@ evalArgs (e:es) env state k =
 extendEnv :: Ide -> EnvVal -> Env -> Env
 extendEnv ide envVal env = \x -> if x == ide then envVal else env x
 
+-- Helper function for binding parameters to new locations
+bindParameters ::
+    [Ide] -> [Value] -> Env -> Store -> NextLoc -> (Env, Store, NextLoc)
+bindParameters paramNames argVals env store nextLoc =
+  foldl (\(e, s, n) (param, val) ->
+          let newStore = updateStore n val s
+              newEnv = extendEnv param (LocRef n) e
+          in (newEnv, newStore, n + 1))
+        (env, store, nextLoc)
+        (zip paramNames argVals)
 
 -- Expression Semantics (E)
 -- ----------------------------------------------------------------------------
@@ -371,23 +396,24 @@ exp_semantics (Identifier ide) env k state@(env', store, nl, input, output) =
     _ -> ErrorState $ "Unexpected environment value for: " ++ ide
 
 -- E[E1(E2)] r k = E[E1] r; Fun?λf.E[E2] r; f; k
-exp_semantics (CallFun funName args) env k state =
-  case env funName of
-    FunDef paramNames body closureEnv ->
+exp_semantics (CallFun funName args) callEnv k state =
+  case callEnv funName of
+    FunDef paramNames body declEnv ->
       if length paramNames /= length args then
         ErrorState $ "Argument count mismatch for function: " ++ funName
       else
         -- Evaluate the args
-        evalArgs args env state (\argVals state' ->
-          -- Extend the env with the args and call the function body
-          let extendedEnv = foldl (\e (param, argVal) ->
-                extendEnv param (ConstVal argVal) e)
-                closureEnv
-                (zip paramNames argVals)
-          in
-            exp_semantics body extendedEnv k state'
-      )
+        evalArgs args callEnv state
+          (\argVals state'@(_, store', nl', input', output') ->
+            -- Use either declEnv or callEnv environment for the function body
+            let preferredEnv = dynamicMix declEnv callEnv
+                (finalEnv, finalStore, finalNl) =
+                  -- Extend preferred environment with parameters
+                  bindParameters paramNames argVals preferredEnv store' nl'
+            in exp_semantics body finalEnv k
+                 (finalEnv, finalStore, finalNl, input', output'))
     _ -> ErrorState $ funName ++ " is not a Function."
+
 
 -- E[if E then E, else E2] r k = R[E] r; Bool?; cond(E[E1] r k, E[E2] r k)
 exp_semantics (IfExp cond thenExp elseExp) env k state =
@@ -417,7 +443,7 @@ exp_semantics (BinOp op exp1 exp2) env k state =
                 _   ->  Error $ "Unknown operator: " ++ op
           in case result of
                Error err -> ErrorState err
-               res            -> k res state''
+               res       -> k res state''
 
         (Boolean b1, Boolean b2) ->
           let result = case op of
@@ -427,7 +453,7 @@ exp_semantics (BinOp op exp1 exp2) env k state =
                 _    -> Error $ "Unknown operator: " ++ op
           in case result of
                Error err -> ErrorState err
-               res            -> k res state''
+               res       -> k res state''
 
         _ -> ErrorState $
              "Type mismatch : " ++ show v' ++ " " ++ op ++ " " ++ show v''
@@ -468,23 +494,23 @@ com_semantics (Output e) env k state =
 
 -- (C3) Procedure Call:
 -- C[E1(E2)] r c = E[E1] r ; Proc? λp . E[E2] r ; p ; c
-com_semantics (CallProc procName args) env k state =
-  case env procName of
-    ProcDef paramNames body closureEnv ->
+com_semantics (CallProc procName args) callEnv k state =
+  case callEnv procName of
+    ProcDef paramNames body declEnv ->
       if length paramNames /= length args then
         ErrorState $ "Argument count mismatch for procedure: " ++ procName
       else
-        -- Evaluate the args
-        evalArgs args env state (\argVals state' ->
-          -- Extend the env with the proc params
-          let extendedEnv =
-                foldl (\e (param,argVal) -> extendEnv param (ConstVal argVal) e)
-                      closureEnv
-                      (zip paramNames argVals)
-          in com_semantics body extendedEnv k state'
-        )
+        evalArgs args callEnv state
+          (\argVals state'@(_, store', nl', input', output') ->
+            -- Use either declEnv or callEnv environment for the procedure body
+            let preferredEnv = dynamicMix declEnv callEnv
+                -- Extend preferred environment with parameters
+                (finalEnv, finalStore, finalNl) =
+                  bindParameters paramNames argVals preferredEnv store' nl'
+            in com_semantics body finalEnv k
+                 (finalEnv, finalStore, finalNl, input', output'))
     _ -> ErrorState $ procName ++ " is not a procedure"
-                
+
 -- (C4) Conditional: 
 -- C[if E then C1 else C2] r c = R[E] r ; Bool? ; cond(C[C1] r c, C[C2] r c)
 com_semantics (IfCom cond thenCom elseCom) env k state =
@@ -588,13 +614,6 @@ dec_semantics (DecSeq d1 d2) env k state =
 -- Run Interpreter
 -- ----------------------------------------------------------------------------
 
-executeProgram :: Dec -> Com -> State -> Ans
-executeProgram decls cmds initialState =
-  dec_semantics decls defaultEnv (\extendedEnv ->
-    com_semantics cmds extendedEnv Stop
-  ) initialState
-
-
 run :: String -> [Value] -> Ans
 run program input =
     case sparse program of
@@ -618,17 +637,3 @@ instance Show EnvVal where
 -- Helper function to display environment
 showEnv :: [Ide] -> Env -> String
 showEnv keys env = unlines [key ++ " -> " ++ show (env key) | key <- keys]
-
-
--- Main (Read from file and run)
--- ----------------------------------------------------------------------------
-
-main :: IO ()
-main = do
-  args <- getArgs
-  case args of
-    [fileName] -> do
-      contents <- readFile fileName
-      let results = run contents []
-      putStrLn $ show results
-    _ -> putStrLn "Usage: Program FileName"
