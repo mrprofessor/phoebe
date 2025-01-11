@@ -40,16 +40,21 @@ data Com
 data Dec
   = Constant Ide Exp
   | Variable Ide Exp
-  | Procedure Ide [Ide] Com           -- Regular procedure
-  | RecProcedure Ide [Ide] Com        -- Recursive procedure
-  | Function Ide [Ide] Exp            -- Regular function
-  | RecFunction Ide [Ide] Exp         -- Recursive function
+  | Procedure Ide [Args] Com          -- Regular procedure
+  | RecProcedure Ide [Args] Com       -- Recursive procedure
+  | Function Ide [Args] Exp           -- Regular function
+  | RecFunction Ide [Args] Exp        -- Recursive function
   | DecSeq Dec Dec
   deriving Show
 
 data ParsedResult
   = ParseOk Program
   | ParseError String
+  deriving Show
+
+data Args
+  = ValueParam Ide                    -- Pass-by-value
+  | ReferenceParam Ide                -- Pass-by-reference
   deriving Show
 
 binop :: Parser String
@@ -184,7 +189,7 @@ dec =
   do symbol "proc"
      name <- token identifier
      symbol "("
-     params <- identifier `sepby` (symbol ",")
+     params <- parameters `sepby` (symbol ",")
      symbol ")"
      symbol ","
      body <- cmd
@@ -193,7 +198,7 @@ dec =
   do symbol "fun"
      name <- token identifier
      symbol "("
-     params <- identifier `sepby` (symbol ",")
+     params <- parameters `sepby` (symbol ",")
      symbol ")"
      symbol ","
      body <- expr          -- Functions return expressions, not commands
@@ -203,7 +208,7 @@ dec =
      symbol "proc"
      name <- token identifier
      symbol "("
-     params <- identifier `sepby` (symbol ",")
+     params <- parameters `sepby` (symbol ",")
      symbol ")"
      symbol ","
      body <- cmd
@@ -213,11 +218,20 @@ dec =
      symbol "fun"
      name <- token identifier
      symbol "("
-     params <- identifier `sepby` (symbol ",")
+     params <- parameters `sepby` (symbol ",")
      symbol ")"
      symbol ","
      body <- expr
      return (RecFunction name params body)
+
+parameters :: Parser Args
+parameters =
+  do symbol "var"
+     paramName <- identifier
+     return (ReferenceParam paramName)
+  +++
+  do paramName <- identifier
+     return (ValueParam paramName)
 
 -- Sequence of Declarations
 decSeq :: Parser Dec
@@ -272,8 +286,8 @@ data Value
 data EnvVal
   = LocRef Integer               -- Represents locations (Loc)
   | ConstVal Value               -- Represents constant values (Rv)
-  | ProcDef [Ide] Com Env        -- Represents procedures (Proc)
-  | FunDef [Ide] Exp Env         -- Represents functions (Fun)
+  | ProcDef [Args] Com Env       -- Represents procedures (Proc)
+  | FunDef [Args] Exp Env        -- Represents functions (Fun)
   | Unbound                      -- Represents unbound identifiers
 
 -- Semantic Domains
@@ -336,6 +350,17 @@ initState inputs = (defaultEnv, defaultStore, 0, inputs, [])
 -- Helper Functions
 -- ----------------------------------------------------------------------------
 
+-- Helper to get parameter name from Args
+getParamName :: Args -> Ide
+getParamName (ValueParam name) = name
+getParamName (ReferenceParam name) = name
+
+getInput :: State -> Input
+getInput (_, _, _, input, _) = input
+
+getOutput :: State -> Output
+getOutput (_, _, _, _, output) = output
+
 -- Helper function to update the store
 updateStore :: Integer -> Value -> Store -> Store
 updateStore loc newVal store = \x -> if x == loc then newVal else store x
@@ -364,6 +389,37 @@ bindParameters paramNames argVals env store nextLoc =
           in (newEnv, newStore, n + 1))
         (env, store, nextLoc)
         (zip paramNames argVals)
+
+-- Helper function to evaluate and bind arguments based on parameter type
+evalAndBindArgs :: [Args] -> [Exp] -> Env -> Store -> NextLoc -> Input -> Output -> 
+                  (([Ide], [EnvVal]) -> (Env, Store, NextLoc, Input, Output) -> Ans) -> Ans
+evalAndBindArgs [] [] env store nl input output k = 
+    k ([], []) (env, store, nl, input, output)
+evalAndBindArgs (param:params) (arg:args) env store nl input output k =
+    case param of
+        -- For pass-by-value: evaluate the argument and store result in new location
+        ValueParam name -> 
+            exp_semantics arg env (\val state'@(env', store', nl', input', output') ->
+                let loc = nl'
+                    newStore = updateStore loc val store'
+                    paramVal = LocRef loc
+                in evalAndBindArgs params args env' newStore (nl' + 1) input' output' 
+                    (\(names, vals) state'' -> 
+                        k (name:names, paramVal:vals) state''))
+            (env, store, nl, input, output)
+            
+        -- For pass-by-reference: get location directly from identifier
+        ReferenceParam name ->
+            case arg of
+                Identifier ide ->
+                    case env ide of
+                        LocRef loc -> 
+                            evalAndBindArgs params args env store nl input output
+                                (\(names, vals) state' -> 
+                                    k (name:names, LocRef loc:vals) state')
+                        _ -> ErrorState $ "Pass by reference requires a variable, got: " ++ ide
+                _ -> ErrorState "Pass by reference argument must be an identifier"
+
 
 -- Expression Semantics (E)
 -- ----------------------------------------------------------------------------
@@ -397,22 +453,23 @@ exp_semantics (Identifier ide) env k state@(env', store, nl, input, output) =
 
 -- E[E1(E2)] r k = E[E1] r; Fun?λf.E[E2] r; f; k
 exp_semantics (CallFun funName args) callEnv k state =
-  case callEnv funName of
-    FunDef paramNames body declEnv ->
-      if length paramNames /= length args then
+  case callEnv funName of 
+    FunDef paramDefs body declEnv ->
+      if length paramDefs /= length args then
         ErrorState $ "Argument count mismatch for function: " ++ funName
       else
-        -- Evaluate the args
-        evalArgs args callEnv state
-          (\argVals state'@(_, store', nl', input', output') ->
-            -- Use either declEnv or callEnv environment for the function body
+        evalAndBindArgs paramDefs args callEnv store nl input output
+          (\(paramNames, paramVals) (env', store', nl', input', output') ->
+            -- Create new environment with bound parameters
             let preferredEnv = dynamicMix declEnv callEnv
-                (finalEnv, finalStore, finalNl) =
-                  -- Extend preferred environment with parameters
-                  bindParameters paramNames argVals preferredEnv store' nl'
+                finalEnv = foldl (\e (name, val) -> extendEnv name val e)
+                               preferredEnv
+                               (zip paramNames paramVals)
             in exp_semantics body finalEnv k
-                 (finalEnv, finalStore, finalNl, input', output'))
-    _ -> ErrorState $ funName ++ " is not a Function."
+                 (finalEnv, store', nl', input', output'))
+          where (_, store, nl, input, output) = state
+    _ -> ErrorState $ funName ++ " is not a function"
+
 
 
 -- E[if E then E, else E2] r k = R[E] r; Bool?; cond(E[E1] r k, E[E2] r k)
@@ -495,21 +552,22 @@ com_semantics (Output e) env k state =
 -- (C3) Procedure Call:
 -- C[E1(E2)] r c = E[E1] r ; Proc? λp . E[E2] r ; p ; c
 com_semantics (CallProc procName args) callEnv k state =
-  case callEnv procName of
-    ProcDef paramNames body declEnv ->
-      if length paramNames /= length args then
-        ErrorState $ "Argument count mismatch for procedure: " ++ procName
-      else
-        evalArgs args callEnv state
-          (\argVals state'@(_, store', nl', input', output') ->
-            -- Use either declEnv or callEnv environment for the procedure body
-            let preferredEnv = dynamicMix declEnv callEnv
-                -- Extend preferred environment with parameters
-                (finalEnv, finalStore, finalNl) =
-                  bindParameters paramNames argVals preferredEnv store' nl'
-            in com_semantics body finalEnv k
-                 (finalEnv, finalStore, finalNl, input', output'))
-    _ -> ErrorState $ procName ++ " is not a procedure"
+    case callEnv procName of
+        ProcDef paramDefs body declEnv ->
+            if length paramDefs /= length args then
+                ErrorState $ "Argument count mismatch for procedure: " ++ procName
+            else
+                evalAndBindArgs paramDefs args callEnv store nl input output
+                    (\(paramNames, paramVals) (env', store', nl', input', output') ->
+                        -- Create new environment with bound parameters
+                        let preferredEnv = dynamicMix declEnv callEnv
+                            finalEnv = foldl (\e (name, val) -> extendEnv name val e)
+                                           preferredEnv
+                                           (zip paramNames paramVals)
+                        in com_semantics body finalEnv k
+                             (finalEnv, store', nl', input', output'))
+                    where (_, store, nl, input, output) = state
+        _ -> ErrorState $ procName ++ " is not a procedure"
 
 -- (C4) Conditional: 
 -- C[if E then C1 else C2] r c = R[E] r ; Bool? ; cond(C[C1] r c, C[C2] r c)

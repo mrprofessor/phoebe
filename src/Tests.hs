@@ -71,7 +71,7 @@ testCases =
       Nothing
       (Left $ ParseOk $ Program 
         (BeginEnd 
-          (Procedure "print" ["x"] (Output (Identifier "x")))
+          (Procedure "print" [ValueParam "x"] (Output (Identifier "x")))
           (CallProc "print" [Number 10]))),
 
     TestCase
@@ -87,7 +87,7 @@ testCases =
       Nothing
       (Left $ ParseOk $ Program 
         (BeginEnd 
-          (Function "inc" ["x"] 
+          (Function "inc" [ValueParam "x"] 
             (BinOp "+" (Identifier "x") (Number 1)))
           (Output (CallFun "inc" [Number 10])))),
 
@@ -120,7 +120,6 @@ testCases =
               (BinOp "+" (Identifier "x") (Number 1)))
               (Output (Identifier "x")))))),
 
-
     TestCase
       "factorial function with call (Parser)"
       ParserTest
@@ -136,7 +135,7 @@ testCases =
       Nothing
       (Left $ ParseOk $ Program 
         (BeginEnd 
-          (RecFunction "fact" ["n"] 
+          (RecFunction "fact" [ValueParam "n"] 
             (IfExp 
               (BinOp "==" (Identifier "n") (Number 0))
               (Number 1)
@@ -146,7 +145,7 @@ testCases =
           (Output (CallFun "fact" [Number 10])))),
 
     TestCase
-      "missing commands in BeginEnd (Parser)"
+      "Fails: missing commands in BeginEnd (Parser)"
       ParserTest
       (unlines [
         "program",
@@ -158,7 +157,7 @@ testCases =
       (Left $ ParseError "Invalid input"),
 
     TestCase
-      "missing declarations in BeginEnd (Parser)"
+      "Fails: missing declarations in BeginEnd (Parser)"
       ParserTest
       (unlines [
         "program",
@@ -170,7 +169,7 @@ testCases =
       (Left $ ParseError "Invalid input"),
 
     TestCase
-      "missing variable declaration keyword (Parser)"
+      "Fails: missing variable declaration keyword (Parser)"
       ParserTest
       (unlines [
         "program",
@@ -183,7 +182,7 @@ testCases =
       (Left $ ParseError "Invalid input"),
 
     TestCase
-      "missing semicolon (Parser)"
+      "Fails: missing semicolon (Parser)"
       ParserTest
       (unlines [
         "program",
@@ -197,7 +196,7 @@ testCases =
       (Left $ ParseError "Invalid input"),
 
     TestCase
-      "incorrect procedure syntax (Parser)"
+      "Fails: incorrect procedure syntax (Parser)"
       ParserTest
       (unlines [
         "program",
@@ -238,7 +237,7 @@ testCases =
       (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 100])),
 
     TestCase
-      "Function declaration and assignment (Interpreter)"
+      "function declaration and assignment (Interpreter)"
       InterpreterTest
       (unlines [
         "program",
@@ -254,7 +253,7 @@ testCases =
       (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 3])),
 
     TestCase
-      "Function declaration and dynamic binding (Interpreter)"
+      "function declaration and dynamic binding (Interpreter)"
       InterpreterTest
       (unlines [
         "program",
@@ -284,9 +283,54 @@ testCases =
       (Just [])
       (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 120])),
 
+    TestCase
+      "procedure with pass-by-value parameters (Interpreter)"
+      InterpreterTest
+      (unlines [
+        "program",
+        "  begin",
+        "    proc swap(a, b),",
+        "      begin",
+        "        var temp = a;",
+        "        a := b;",
+        "        b := temp",
+        "      end;",
+        "    var x = 5;",
+        "    var y = 10;",
+        "    swap(x, y);",
+        "    output x;",
+        "    output y",
+        "  end"
+      ])
+      (Just [])
+      (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 5, Numeric 10])),
+
+    TestCase
+      "procedure with pass-by-reference parameters (Interpreter)"
+      InterpreterTest
+      (unlines [
+        "program",
+        "  begin",
+        "    proc swap(var a, var b),",
+        "      begin",
+        "        var temp = a;",
+        "        a := b;",
+        "        b := temp",
+        "      end;",
+        "    var x = 5;",
+        "    var y = 10;",
+        "    swap(x, y);",
+        "    output x;",
+        "    output y",
+        "  end"
+      ])
+      (Just [])
+      (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 10, Numeric 5])),
+
+
     -- Error cases
     TestCase
-      "accessing undefined variable (Interpreter)"
+      "Fails: accessing undefined variable (Interpreter)"
       InterpreterTest
       (unlines [
         "program",
@@ -299,7 +343,7 @@ testCases =
       (Right $ ErrorState "Undefined identifier: x"),
 
     TestCase
-      "division by zero (Interpreter)"
+    "Fails: division by zero (Interpreter)"
       InterpreterTest
       (unlines [
         "program",
@@ -309,7 +353,51 @@ testCases =
         "  end"
       ])
       (Just [])
-      (Right $ ErrorState "Division by zero")
+      (Right $ ErrorState "Division by zero"),
+
+    TestCase
+      "Fails: pass-by-reference with non-identifier argument (Interpreter)"
+      InterpreterTest
+      (unlines [
+        "program",
+        "  begin",
+        "    proc swap(var a, var b),",
+        "      begin",
+        "        var temp = a;",
+        "        a := b;",
+        "        b := temp",
+        "      end;",
+        "    var x = 5;",
+        "    var y = 10;",
+        "    swap(x, 3);",
+        "    output x;",
+        "    output y",
+        "  end"
+      ])
+      (Just [])
+      (Right $ ErrorState "Pass by reference argument must be an identifier"),
+
+    TestCase
+      "Fails: pass-by-reference with constant argument (Interpreter)"
+      InterpreterTest
+      (unlines [
+        "program",
+        "  begin",
+        "    proc swap(var a, var b),",
+        "      begin",
+        "        var temp = a;",
+        "        a := b;",
+        "        b := temp",
+        "      end;",
+        "    var x = 5;",
+        "    const y = 10;",
+        "    swap(x, y);",
+        "    output x;",
+        "    output y",
+        "  end"
+      ])
+      (Just [])
+      (Right $ ErrorState "Pass by reference requires a variable, got: y")
   ]
 
 testSuite :: Spec
