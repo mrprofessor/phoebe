@@ -484,7 +484,7 @@ com_semantics (Assign e1 e2) env k state =
              $ "Left-hand side of assignment must be a variable or location: "
              ++ ide
     _ -> ErrorState "Left-hand side of assignment must be an identifier"
-
+    
 -- (C2) Output:
 -- C[output E] r c = R[E] r λe s. (e, s)
 com_semantics (Output e) env k state =
@@ -529,7 +529,7 @@ com_semantics (WhileDo cond body) env k state =
       Boolean True -> com_semantics body env (\state'' -> 
         com_semantics (WhileDo cond body) env k state'') state'
       Boolean False -> k state'
-      _ -> error ("Expected a boolean in while condition, got: " ++ show v)
+      _ -> ErrorState $ "Expected a boolean in while condition, got: " ++ show v
   ) state
 
 -- (C6) Block:
