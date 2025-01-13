@@ -4,22 +4,102 @@
 :END:
 
 Phoebe is an experimental programming language built with Haskell.  A
-dynamically typed language with a simple syntax loosely based on the
-specification by [[https://www.cl.cam.ac.uk/archive/mjcg/][Micheal J.C Gordon]]'s book [[https://link.springer.com/book/10.1007/978-1-4612-6228-2][The Denotational
+dynamically typed language with a simple syntax based on the
+specification by [[https://www.cl.cam.ac.uk/archive/mjcg/][Michael J.C. Gordon]]'s book [[https://link.springer.com/book/10.1007/978-1-4612-6228-2][The Denotational
 Description of Programming Languages]]
-
 
 ** Features
 :PROPERTIES:
 :CUSTOM_ID: features
 :END:
 
-  - [X] Numbers(Integers)
+  - [X] Control Structures (if-then-else, whiledo)
   - [X] Blocks with multi-expressions
-  - [ ] Functions (Call by ref/value/name)
-  - [ ] Dynamic/Static binding
-  - [ ] Type checking
-  - [X] REPL
-  - [ ] Control Structures (Instead of Cmd)
-  - [ ] Garbage collection
-    
+  - [X] Functions (Call by ref/value)
+  - [X] Dynamic/Static binding
+  - [ ] Escapes and Jumps
+  - [ ] Data structures
+  - [ ] Iteration constructs
+  - [ ] Types ??
+  - [X] Interprets a File
+  - [X] Regression tests
+
+
+** Examples
+:PROPERTIES:
+:CUSTOM_ID: examples
+:END:
+
+*** Basic Program Structure
+:PROPERTIES:
+:CUSTOM_ID: basic-program-structure
+:END:
+#+BEGIN_SRC
+program
+begin
+  var x = 10;
+  output x
+end
+#+END_SRC
+
+Output: =Stop with output: [Numeric 8]=
+
+*** Functions and Procedures
+:PROPERTIES:
+:CUSTOM_ID: functions-and-procedures
+:END:
+#+BEGIN_SRC
+program
+begin
+  fun add(x, y), x + y;
+  
+  var result = add!(5, 3);
+  output result
+end
+#+END_SRC
+
+Output: =Stop with output: [Numeric 8]=
+
+*** Control Structures
+:PROPERTIES:
+:CUSTOM_ID: control-structures
+:END:
+#+BEGIN_SRC
+program
+begin
+  begin
+    var x = 10;
+    if x > 5 then
+      output x
+    else
+      output 0
+  end
+end
+#+END_SRC
+
+Output: =Stop with output: [Numeric 10]=
+
+** Development
+:PROPERTIES:
+:CUSTOM_ID: development
+:END:
+
+Run the interpreter in GHCi.
+
+#+BEGIN_SRC sh
+  make interpreter
+#+END_SRC 
+
+Run the following command to build the project. The executable will be
+available in the `dist` directory.
+
+#+BEGIN_SRC sh
+    make build
+#+END_SRC
+
+Run tests
+
+#+BEGIN_SRC sh
+  make test
+#+END_SRC
+

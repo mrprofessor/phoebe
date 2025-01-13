@@ -27,7 +27,7 @@ testCases :: [TestCase]
 testCases =
   [
     TestCase
-      "variable declaration with output (Parser)"
+      "Passes: variable declaration with output (Parser)"
       ParserTest
       (unlines [
         "program",
@@ -43,7 +43,7 @@ testCases =
           (Output (Identifier "x")))),
 
     TestCase
-      "constant declaration with output (Parser)"
+      "Passes: constant declaration with output (Parser)"
       ParserTest
       (unlines [
         "program",
@@ -59,7 +59,7 @@ testCases =
           (Output (Identifier "x")))),
 
     TestCase
-      "procedure declaration with call (Parser)"
+      "Passes: procedure declaration with call (Parser)"
       ParserTest
       (unlines [
         "program",
@@ -75,7 +75,7 @@ testCases =
           (CallProc "print" [Number 10]))),
 
     TestCase
-      "function declaration with call (Parser)"
+    "Passes: function declaration with call (Parser)"
       ParserTest
       (unlines [
         "program",
@@ -92,7 +92,7 @@ testCases =
           (Output (CallFun "inc" [Number 10])))),
 
     TestCase
-      "IfElseThen Command (Parser)"
+      "Passes: IfElseThen Command (Parser)"
       ParserTest
       (unlines [
           "program",
@@ -121,7 +121,7 @@ testCases =
               (Output (Identifier "x")))))),
 
     TestCase
-      "factorial function with call (Parser)"
+      "Passes: factorial function with call (Parser)"
       ParserTest
       (unlines [
         "program",
@@ -145,7 +145,7 @@ testCases =
           (Output (CallFun "fact" [Number 10])))),
 
     TestCase
-      "Fails: missing commands in BeginEnd (Parser)"
+      "Passes: missing commands in BeginEnd (Parser)"
       ParserTest
       (unlines [
         "program",
@@ -211,7 +211,7 @@ testCases =
 
     -- Interpreter Tests
     TestCase
-      "variable declaration and output (Interpreter)"
+      "Passes: variable declaration and output (Interpreter)"
       InterpreterTest
       (unlines [
         "program",
@@ -224,7 +224,7 @@ testCases =
       (Right $ Stop (defaultEnv, defaultStore, 1, [], [Numeric 42])),
 
     TestCase
-      "constant declaration and output (Interpreter)"
+      "Passes: constant declaration and output (Interpreter)"
       InterpreterTest
       (unlines [
         "program",
@@ -237,7 +237,7 @@ testCases =
       (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 100])),
 
     TestCase
-      "function declaration and assignment (Interpreter)"
+      "Passes: function declaration and assignment (Interpreter)"
       InterpreterTest
       (unlines [
         "program",
@@ -253,7 +253,7 @@ testCases =
       (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 3])),
 
     TestCase
-      "function declaration and dynamic binding (Interpreter)"
+      "Passes: function declaration and dynamic binding (Interpreter)"
       InterpreterTest
       (unlines [
         "program",
@@ -269,7 +269,7 @@ testCases =
       (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 3])),
 
     TestCase
-      "factorial function with call (Interpreter)"
+      "Passes: factorial function with call (Interpreter)"
       InterpreterTest
       (unlines [
         "program",
@@ -284,7 +284,7 @@ testCases =
       (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 120])),
 
     TestCase
-      "procedure with pass-by-value parameters (Interpreter)"
+      "Passes: procedure with pass-by-value parameters (Interpreter)"
       InterpreterTest
       (unlines [
         "program",
@@ -306,7 +306,7 @@ testCases =
       (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 5, Numeric 10])),
 
     TestCase
-      "procedure with pass-by-reference parameters (Interpreter)"
+      "Passes: procedure with pass-by-reference parameters (Interpreter)"
       InterpreterTest
       (unlines [
         "program",
