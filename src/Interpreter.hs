@@ -34,6 +34,9 @@ data Com
   | WhileDo Exp Com 
   | BeginEnd Dec Com
   | ComSeq Com Com
+  | Trap Com [(Ide, Com)]             -- Trap statement
+  | EscapeTo Ide
+ -- trap C [I1: C1, I2: C2, ...] end
   deriving Show
 
 -- D ::= const I = E | var I = E | proc I(I1),C | fun I(I1),E | D1;D2
@@ -157,6 +160,20 @@ cmd =
      c <- cmdSeq
      symbol "}"
      return c
+  +++
+  do symbol "trap"
+     body <- cmd
+     labels <- sepby (do
+       l <- token identifier
+       symbol ":"
+       c <- cmd
+       return (l, c)) (symbol ",")
+     symbol "end"
+     return (Trap body labels)
+  +++
+  do symbol "escapeto"
+     label <- token identifier
+     return (EscapeTo label)
 
 -- Sequence of commands
 cmdSeq :: Parser Com
@@ -325,7 +342,7 @@ staticMix declEnv callEnv = declEnv
 dynamicMix :: Mix
 dynamicMix declEnv callEnv = callEnv
 
--- Continuations
+-- Continuations (Command, Expression and Declaration)
 -- ----------------------------------------------------------------------------
 
 type Ec = Value -> State -> Ans  -- Ec = Val -> State -> Ans
@@ -355,12 +372,6 @@ getParamName :: Args -> Ide
 getParamName (ValueParam name) = name
 getParamName (ReferenceParam name) = name
 
-getInput :: State -> Input
-getInput (_, _, _, input, _) = input
-
-getOutput :: State -> Output
-getOutput (_, _, _, _, output) = output
-
 -- Helper function to update the store
 updateStore :: Integer -> Value -> Store -> Store
 updateStore loc newVal store = \x -> if x == loc then newVal else store x
@@ -378,17 +389,6 @@ evalArgs (e:es) env state k =
 -- Extend the environment with a parameter and its value
 extendEnv :: Ide -> EnvVal -> Env -> Env
 extendEnv ide envVal env = \x -> if x == ide then envVal else env x
-
--- Helper function for binding parameters to new locations
-bindParameters ::
-    [Ide] -> [Value] -> Env -> Store -> NextLoc -> (Env, Store, NextLoc)
-bindParameters paramNames argVals env store nextLoc =
-  foldl (\(e, s, n) (param, val) ->
-          let newStore = updateStore n val s
-              newEnv = extendEnv param (LocRef n) e
-          in (newEnv, newStore, n + 1))
-        (env, store, nextLoc)
-        (zip paramNames argVals)
 
 -- Helper function to evaluate and bind arguments based on parameter type
 evalAndBindArgs :: [Args] -> [Exp] -> Env -> Store -> NextLoc -> Input -> Output -> 
@@ -604,6 +604,36 @@ com_semantics (ComSeq c1 c2) env k state =
     com_semantics c2 env k state'
   ) state
 
+-- EscapeTo semantics
+-- C[escapeto l] r c = E[l] r;Cc? λc'.c'
+com_semantics (EscapeTo label) env k state =
+  let (env', store, nl, input, output) = state
+      -- Create an immediate escape signal
+      escapeEnv = extendEnv label (ConstVal (Numeric 1)) env'
+  in Result [] (escapeEnv, store, nl, input, output)
+
+-- Trap semantics
+-- C[trap C l₁:C₁,...,ln:Cn end] r c =
+--   C[C] r(C[C₁] r c/l₁,...,C[Cn] r c/ln) c
+com_semantics (Trap body labels) env k state =
+  case com_semantics body env Stop state of
+    Result _ state'@(env', _, _, _, _) ->
+      -- Check if any label has been triggered
+      let findLabel l = case env' l of
+                         ConstVal (Numeric 1) -> True
+                         _ -> False
+          matchingLabels = filter (\(l, _) -> findLabel l) labels
+          -- Now unflag the escape label
+          resetEnv = extendEnv "escape" Unbound env'
+      in case matchingLabels of
+           [(_, labelCom)] -> com_semantics labelCom env k state'
+           -- [] -> k state'  -- No escape occurred
+           -- TODO : Show the attempted escape label
+           [] -> ErrorState $ "No matching escape label found"
+           _  -> ErrorState "Multiple matching escape labels found"
+    Stop s -> k s
+    ErrorState msg -> ErrorState msg
+
 
 -- Declaration Semantics (D)
 -- ----------------------------------------------------------------------------
@@ -695,3 +725,5 @@ instance Show EnvVal where
 -- Helper function to display environment
 showEnv :: [Ide] -> Env -> String
 showEnv keys env = unlines [key ++ " -> " ++ show (env key) | key <- keys]
+
+

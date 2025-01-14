@@ -327,6 +327,45 @@ testCases =
       (Just [])
       (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 10, Numeric 5])),
 
+    TestCase
+      "Passes: trap block with escapeto (Interpreter)"
+      InterpreterTest
+      (unlines [
+        "program",
+        "  begin",
+        "    var x = 1;",
+        "    trap {",
+        "      output(x);",
+        "      escapeto label1;",
+        "      output(999)",
+        "      }",
+        "      label1: output(100)",
+        "    end",
+        "  end"
+      ])
+      (Just [])
+      (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 1, Numeric 100])),
+
+    TestCase
+      "Passes: trap with conditional escapeto (Interpreter)"
+      InterpreterTest
+      (unlines [
+        "program",
+        "  begin",
+        "    var x = 5;",
+        "    trap {",
+        "      if x > 3 then",
+        "        escapeto label1",
+        "      else",
+        "        escapeto label2",
+        "      }",
+        "      label1: output(10),",
+        "      label2: output(20)",
+        "    end",
+        "  end"
+      ])
+      (Just [])
+      (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 10])),
 
     -- Error cases
     TestCase
