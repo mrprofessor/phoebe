@@ -18,6 +18,7 @@ data Program = Program Com
 data Exp
   = Number Integer
   | Bool Bool
+  | String String
   | Read
   | Identifier Ide
   | CallFun Ide [Exp]                 -- Later support CallFun Exp [Exp]
@@ -34,9 +35,9 @@ data Com
   | WhileDo Exp Com 
   | BeginEnd Dec Com
   | ComSeq Com Com
-  | Trap Com [(Ide, Com)]             -- Trap statement
+  | Trap Com [(Ide, Com)]             -- trap C [I1: C1, I2: C2, ...] end
   | EscapeTo Ide
- -- trap C [I1: C1, I2: C2, ...] end
+  | Label Ide Com
   deriving Show
 
 -- D ::= const I = E | var I = E | proc I(I1),C | fun I(I1),E | D1;D2
@@ -61,11 +62,14 @@ data Args
   deriving Show
 
 binop :: Parser String
-binop = do   symbol "+"   ; return "+"
+binop = do   symbol "<="  ; return "<="
+      +++ do symbol ">="  ; return ">="
+      +++ do symbol "=="  ; return "=="
+      +++ do symbol "+"   ; return "+"
       +++ do symbol "-"   ; return "-"
       +++ do symbol "*"   ; return "*"
       +++ do symbol "/"   ; return "/"
-      +++ do symbol "=="  ; return "=="
+      +++ do symbol "%"   ; return "%"
       +++ do symbol "<"   ; return "<"
       +++ do symbol ">"   ; return ">"
 
@@ -100,6 +104,11 @@ factor :: Parser Exp
 factor =
   do n <- nat
      return (Number (toInteger n))
+  +++
+  do symbol "`"
+     s <- many (sat (/= '`'))
+     symbol "`"
+     return (String s)
   +++
   do symbol "true"
      return (Bool True)
@@ -162,7 +171,7 @@ cmd =
      return c
   +++
   do symbol "trap"
-     body <- cmd
+     body <- cmdSeq
      labels <- sepby (do
        l <- token identifier
        symbol ":"
@@ -174,6 +183,11 @@ cmd =
   do symbol "escapeto"
      label <- token identifier
      return (EscapeTo label)
+  +++
+  do name <- token identifier
+     symbol ":"
+     rest <- cmd
+     return (Label name rest)
 
 -- Sequence of commands
 cmdSeq :: Parser Com
@@ -294,6 +308,7 @@ sparse xs = case Parsing.parse program xs of
 data Value 
   = Numeric Integer              -- Represents basic values (Bv)
   | Boolean Bool                 -- Represents boolean values (Bool)
+  | Str String                   -- Represents string values (String)
   | File [Value]                 -- Represents files (File = Rv*)
   | Unused                       -- Represents {unused} in Store
   | Error String                 -- Represents error states
@@ -433,6 +448,9 @@ exp_semantics (Number num) env k state = k (Numeric num) state
 -- E[true] r k = k true, E[false] r k = k false
 exp_semantics (Bool bool) env k state = k (Boolean bool) state
 
+-- E["s"] r k = k "s"
+exp_semantics (String s) env k state = k (Str s) state
+
 -- E[read] r k s =
 --   null(s input) -> error
 --   Otherwise k (head(s input)) (s[tail(s input)/input])
@@ -487,25 +505,31 @@ exp_semantics (BinOp op exp1 exp2) env k state =
     exp_semantics exp2 env (\v'' state'' ->
       case (v', v'') of
         (Numeric n1, Numeric n2) -> 
-          let result =  case op of
-                "+" ->  Numeric (n1 + n2)
-                "-" ->  Numeric (n1 - n2)
-                "*" ->  Numeric (n1 * n2)
-                "/" ->  if n2 /= 0
-                        then Numeric (n1 `div` n2)
-                        else Error "Division by zero"
+          let result = case op of
+                -- Comparison operators
+                "<=" -> Boolean (n1 <= n2)
+                ">=" -> Boolean (n1 >= n2)
                 "==" -> Boolean (n1 == n2)
-                "<" ->  Boolean (n1 < n2)
-                ">" ->  Boolean (n1 > n2)
-                _   ->  Error $ "Unknown operator: " ++ op
+                "<"  -> Boolean (n1 < n2)
+                ">"  -> Boolean (n1 > n2)
+                -- Arithmetic operators
+                "+"  -> Numeric (n1 + n2)
+                "-"  -> Numeric (n1 - n2)
+                "*"  -> Numeric (n1 * n2)
+                "/"  -> if n2 /= 0
+                       then Numeric (n1 `div` n2)
+                       else Error "Division by zero"
+                "%"  -> if n2 /= 0
+                       then Numeric (n1 `mod` n2)
+                       else Error "Modulo by zero"
+                _    -> Error $ "Unknown operator: " ++ op
           in case result of
                Error err -> ErrorState err
                res       -> k res state''
 
         (Boolean b1, Boolean b2) ->
           let result = case op of
-                ">" ->  Boolean (b1 && b2)
-                "<" ->  Boolean (b1 || b2)
+                -- Boolean operators
                 "==" -> Boolean (b1 == b2)
                 _    -> Error $ "Unknown operator: " ++ op
           in case result of
