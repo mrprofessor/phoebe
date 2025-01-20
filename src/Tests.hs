@@ -110,7 +110,7 @@ testCases =
       (Left $ ParseOk $ Program 
       (BeginEnd 
           (Variable "x" Read)
-          (IfCom
+          (IfCmd
           (BinOp "==" 
               (BinOp "/" (Identifier "x") (Number 2)) 
               (Number 1))

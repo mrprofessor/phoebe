@@ -11,7 +11,7 @@ import System.Environment (getArgs)
 type Ide = String
 
 -- P ::= program C
-data Program = Program Com
+data Program = Program Cmd
   deriving Show
 
 -- E :: = B | true | false | read | I | E1 (E2) | if E then E1 else E2 | E O E2
@@ -27,28 +27,28 @@ data Exp
   deriving Show
 
 -- C::= E1 := E2 | output E | E1(E2) | if E then C1 else C2 | while E do C | begin D;C end | C1 ;C2
-data Com
+data Cmd
   = Assign Exp Exp
   | Output Exp
   | CallProc Ide [Exp]                -- Later support CallProc Exp [Exp]
-  | IfCom Exp Com Com
-  | WhileDo Exp Com 
-  | BeginEnd Dec Com
-  | ComSeq Com Com
-  | Trap Com [(Ide, Com)]             -- trap C [I1: C1, I2: C2, ...] end
+  | IfCmd Exp Cmd Cmd
+  | WhileDo Exp Cmd
+  | BeginEnd Dec Cmd
+  | CmdBlk Cmd Cmd
+  | Trap Cmd [(Ide, Cmd)]             -- trap C [I1: C1, I2: C2, ...] end
   | EscapeTo Ide
-  | Label Ide Com
+  | Label Ide Cmd
   deriving Show
 
 -- D ::= const I = E | var I = E | proc I(I1),C | fun I(I1),E | D1;D2
 data Dec
   = Constant Ide Exp
   | Variable Ide Exp
-  | Procedure Ide [Args] Com          -- Regular procedure
-  | RecProcedure Ide [Args] Com       -- Recursive procedure
+  | Procedure Ide [Args] Cmd          -- Regular procedure
+  | RecProcedure Ide [Args] Cmd       -- Recursive procedure
   | Function Ide [Args] Exp           -- Regular function
   | RecFunction Ide [Args] Exp        -- Recursive function
-  | DecSeq Dec Dec
+  | DecBlk Dec Dec
   deriving Show
 
 data ParsedResult
@@ -83,10 +83,10 @@ expr =
   do symbol "if"
      cond <- expr
      symbol "then"
-     thenCom <- expr
+     thenCmd <- expr
      symbol "else"
-     elseCom <- expr
-     return (IfExp cond thenCom elseCom)
+     elseCmd <- expr
+     return (IfExp cond thenCmd elseCmd)
   +++
   do name <- token identifier
      symbol "!"
@@ -127,7 +127,7 @@ factor =
      symbol ")"
      return e
 
-cmd :: Parser Com
+cmd :: Parser Cmd
 cmd =
   do symbol "output"
      e <- expr
@@ -139,9 +139,9 @@ cmd =
      return (Assign leftExp rightExp)
   +++
   do symbol "begin"
-     decs <- decSeq
+     decs <- decBlk
      symbol ";"                       -- Mandatory ; after declarations
-     cmds <- cmdSeq
+     cmds <- cmdBlk
      symbol "end"
      return (BeginEnd decs cmds)
   +++
@@ -154,10 +154,10 @@ cmd =
   do symbol "if"
      cond <- expr
      symbol "then"
-     thenCom <- cmd
+     thenCmd <- cmd
      symbol "else"
-     elseCom <- cmd
-     return (IfCom cond thenCom elseCom)
+     elseCmd <- cmd
+     return (IfCmd cond thenCmd elseCmd)
   +++
   do name <- token identifier
      symbol "("
@@ -166,12 +166,12 @@ cmd =
      return (CallProc name args)
   +++
   do symbol "{"
-     c <- cmdSeq
+     c <- cmdBlk
      symbol "}"
      return c
   +++
   do symbol "trap"
-     body <- cmdSeq
+     body <- cmdBlk
      labels <- sepby (do
        l <- token identifier
        symbol ":"
@@ -190,12 +190,12 @@ cmd =
      return (Label name rest)
 
 -- Sequence of commands
-cmdSeq :: Parser Com
-cmdSeq =
+cmdBlk :: Parser Cmd
+cmdBlk =
   do c1 <- cmd
      (do symbol ";"
-         rest <- cmdSeq
-         return (ComSeq c1 rest)
+         rest <- cmdBlk
+         return (CmdBlk c1 rest)
       -- +++                          -- Make ; optional for the last command
       -- do symbol ";"
       --    return c1)
@@ -265,12 +265,12 @@ parameters =
      return (ValueParam paramName)
 
 -- Sequence of Declarations
-decSeq :: Parser Dec
-decSeq =
+decBlk :: Parser Dec
+decBlk =
   do d1 <- dec
      (do symbol ";"
-         rest <- decSeq
-         return (DecSeq d1 rest)
+         rest <- decBlk
+         return (DecBlk d1 rest)
       -- +++                          -- Make ; optional for the last dec
       -- do symbol ";"
       --    return d1
@@ -318,7 +318,7 @@ data Value
 data EnvVal
   = LocRef Integer               -- Represents locations (Loc)
   | ConstVal Value               -- Represents constant values (Rv)
-  | ProcDef [Args] Com Env       -- Represents procedures (Proc)
+  | ProcDef [Args] Cmd Env       -- Represents procedures (Proc)
   | FunDef [Args] Exp Env        -- Represents functions (Fun)
   | Unbound                      -- Represents unbound identifiers
 
@@ -546,12 +546,12 @@ exp_semantics (BinOp op exp1 exp2) env k state =
 -- ----------------------------------------------------------------------------
 
 
--- C :: Com -> Env -> Cc -> Cc
-com_semantics :: Com -> Env -> Cc -> State -> Ans
+-- C :: Cmd -> Env -> Cc -> Cc
+cmd_semantics :: Cmd -> Env -> Cc -> State -> Ans
 
 -- (C1) Assignment:
 -- C[E1 := E2] r c = R[E1] r ; Loc? ; λl.(R[E2] r ; update l ; c)
-com_semantics (Assign e1 e2) env k state =
+cmd_semantics (Assign e1 e2) env k state =
   case e1 of
     Identifier ide -> -- The left-hand side must be an identifier FIXME
       case env ide of
@@ -568,14 +568,14 @@ com_semantics (Assign e1 e2) env k state =
     
 -- (C2) Output:
 -- C[output E] r c = R[E] r λe s. (e, s)
-com_semantics (Output e) env k state =
+cmd_semantics (Output e) env k state =
   exp_semantics e env (\v state'@(env', store, nl, input, output) ->
     k (env', store, nl, input, output ++ [v])
   ) state
 
 -- (C3) Procedure Call:
 -- C[E1(E2)] r c = E[E1] r ; Proc? λp . E[E2] r ; p ; c
-com_semantics (CallProc procName args) callEnv k state =
+cmd_semantics (CallProc procName args) callEnv k state =
     case callEnv procName of
         ProcDef paramDefs body declEnv ->
             if length paramDefs /= length args then
@@ -588,49 +588,49 @@ com_semantics (CallProc procName args) callEnv k state =
                             finalEnv = foldl (\e (name, val) -> extendEnv name val e)
                                            preferredEnv
                                            (zip paramNames paramVals)
-                        in com_semantics body finalEnv k
+                        in cmd_semantics body finalEnv k
                              (finalEnv, store', nl', input', output'))
                     where (_, store, nl, input, output) = state
         _ -> ErrorState $ procName ++ " is not a procedure"
 
 -- (C4) Conditional: 
 -- C[if E then C1 else C2] r c = R[E] r ; Bool? ; cond(C[C1] r c, C[C2] r c)
-com_semantics (IfCom cond thenCom elseCom) env k state =
+cmd_semantics (IfCmd cond thenCmd elseCmd) env k state =
   exp_semantics cond env (\v state' ->
     case v of
-      Boolean True -> com_semantics thenCom env k state'
-      Boolean False -> com_semantics elseCom env k state'
+      Boolean True -> cmd_semantics thenCmd env k state'
+      Boolean False -> cmd_semantics elseCmd env k state'
       _ -> ErrorState $ "Expected a boolean in if condition, got: " ++ show v
   ) state
 
 -- (C5) While Loop:
 -- C[while E do C] r c = R[E] r ; Bool? ; cond(C[C] r (C[while E do C] r c), c)
-com_semantics (WhileDo cond body) env k state = 
+cmd_semantics (WhileDo cond body) env k state = 
   exp_semantics cond env (\v state' ->
     case v of
-      Boolean True -> com_semantics body env (\state'' -> 
-        com_semantics (WhileDo cond body) env k state'') state'
+      Boolean True -> cmd_semantics body env (\state'' -> 
+        cmd_semantics (WhileDo cond body) env k state'') state'
       Boolean False -> k state'
       _ -> ErrorState $ "Expected a boolean in while condition, got: " ++ show v
   ) state
 
 -- (C6) Block:
 -- C[begin D;C end] r c = D[D] r λr'.C[C] r[r'] c
-com_semantics (BeginEnd decs cmds) env k state =
+cmd_semantics (BeginEnd decs cmds) env k state =
   dec_semantics decs env (\extendedEnv ->
-    com_semantics cmds extendedEnv k
+    cmd_semantics cmds extendedEnv k
   ) state
 
 -- (C7) Sequence:
 -- C[C1;C2] r c = C[C1] r ; C[C2] r ; c
-com_semantics (ComSeq c1 c2) env k state =
-  com_semantics c1 env (\state' ->
-    com_semantics c2 env k state'
+cmd_semantics (CmdBlk c1 c2) env k state =
+  cmd_semantics c1 env (\state' ->
+    cmd_semantics c2 env k state'
   ) state
 
 -- EscapeTo semantics
 -- C[escapeto l] r c = E[l] r;Cc? λc'.c'
-com_semantics (EscapeTo label) env k state =
+cmd_semantics (EscapeTo label) env k state =
   let (env', store, nl, input, output) = state
       -- Create an immediate escape signal
       escapeEnv = extendEnv label (ConstVal (Numeric 1)) env'
@@ -639,8 +639,8 @@ com_semantics (EscapeTo label) env k state =
 -- Trap semantics
 -- C[trap C l₁:C₁,...,ln:Cn end] r c =
 --   C[C] r(C[C₁] r c/l₁,...,C[Cn] r c/ln) c
-com_semantics (Trap body labels) env k state =
-  case com_semantics body env Stop state of
+cmd_semantics (Trap body labels) env k state =
+  case cmd_semantics body env Stop state of
     Result _ state'@(env', _, _, _, _) ->
       -- Check if any label has been triggered
       let findLabel l = case env' l of
@@ -650,7 +650,7 @@ com_semantics (Trap body labels) env k state =
           -- Now unflag the escape label
           resetEnv = extendEnv "escape" Unbound env'
       in case matchingLabels of
-           [(_, labelCom)] -> com_semantics labelCom env k state'
+           [(_, labelCmd)] -> cmd_semantics labelCmd env k state'
            -- [] -> k state'  -- No escape occurred
            -- TODO : Show the attempted escape label
            [] -> ErrorState $ "No matching escape label found"
@@ -717,7 +717,7 @@ dec_semantics (RecFunction ide params body) env k state =
 
 -- (D5) Sequence of declarations:
 -- D[D1;D2] r u = D[D1] r λr₁ . D[D2] r[r1] λr2 . u(r1[r2])
-dec_semantics (DecSeq d1 d2) env k state =
+dec_semantics (DecBlk d1 d2) env k state =
   dec_semantics d1 env (\extendedEnv state' ->
     dec_semantics d2 extendedEnv k state'
   ) state
@@ -730,7 +730,7 @@ run :: String -> [Value] -> Ans
 run program input =
     case sparse program of
       ParseOk (Program cmd) ->
-        com_semantics cmd defaultEnv Stop (initState input)
+        cmd_semantics cmd defaultEnv Stop (initState input)
       ParseError msg -> ErrorState ("Parser Error: " ++ msg)
 
 instance Show Ans where
