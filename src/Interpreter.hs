@@ -303,7 +303,8 @@ sparse xs = case Parsing.parse program xs of
 -- Value and Semantic Domains
 -- ----------------------------------------------------------------------------
 
--- Value Domain: Dv = Loc + Rv + Proc + Fun
+-- Bv = Num + Bool + Str + Loc (Basic Values) (Not Required)
+
 -- Rv = Bool + Bv (basic values and booleans)
 data Value 
   = Numeric Integer              -- Represents basic values (Bv)
@@ -311,7 +312,7 @@ data Value
   | Str String                   -- Represents string values (String)
   | File [Value]                 -- Represents files (File = Rv*)
   | Unused                       -- Represents {unused} in Store
-  | Error String                 -- Represents error states
+  | Error String                 -- Represents error strings/values
   deriving (Eq, Show)
 
 -- Denotable Values: Dv = Loc + Rv + Proc + Fun
@@ -321,6 +322,11 @@ data EnvVal
   | ProcDef [Args] Cmd Env       -- Represents procedures (Proc)
   | FunDef [Args] Exp Env        -- Represents functions (Fun)
   | Unbound                      -- Represents unbound identifiers
+
+-- Sv = File + Rv (Not required)
+
+-- Ev = Dv (Expressible Values e)
+-- Implementing this does not add any value
 
 -- Semantic Domains
 -- ----------------------------------------------------------------------------
@@ -338,7 +344,7 @@ type Output = [Value]
 type NextLoc = Integer
 
 -- State: Captures the current env, store, next location, input, and output
-type State = (Env, Store, NextLoc, Input, Input)
+type State = (Env, Store, NextLoc, Input, Output)
 
 -- Semantic Domain: Ans = {error, stop} + [Rv x Ans]
 data Ans
@@ -490,7 +496,7 @@ exp_semantics (CallFun funName args) callEnv k state =
 
 
 
--- E[if E then E, else E2] r k = R[E] r; Bool?; cond(E[E1] r k, E[E2] r k)
+-- E[if E then E1 else E2] r k = R[E] r; Bool?; cond(E[E1] r k, E[E2] r k)
 exp_semantics (IfExp cond thenExp elseExp) env k state =
   exp_semantics cond env (\v state' ->
     case v of
@@ -550,7 +556,7 @@ exp_semantics (BinOp op exp1 exp2) env k state =
 cmd_semantics :: Cmd -> Env -> Cc -> State -> Ans
 
 -- (C1) Assignment:
--- C[E1 := E2] r c = R[E1] r ; Loc? ; λl.(R[E2] r ; update l ; c)
+-- C[E1 := E2] r c = E[E1] r ; Loc? ; λl.(R[E2] r ; update l ; c)
 cmd_semantics (Assign e1 e2) env k state =
   case e1 of
     Identifier ide -> -- The left-hand side must be an identifier FIXME
@@ -749,5 +755,3 @@ instance Show EnvVal where
 -- Helper function to display environment
 showEnv :: [Ide] -> Env -> String
 showEnv keys env = unlines [key ++ " -> " ++ show (env key) | key <- keys]
-
-
