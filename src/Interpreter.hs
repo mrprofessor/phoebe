@@ -321,6 +321,7 @@ data EnvVal
   | ConstVal Value               -- Represents constant values (Rv)
   | ProcDef [Args] Cmd Env       -- Represents procedures (Proc)
   | FunDef [Args] Exp Env        -- Represents functions (Fun)
+  | LabelDef Cc                  -- Represents Label definations (Label)
   | Unbound                      -- Represents unbound identifiers
 
 -- Sv = File + Rv (Not required)
@@ -634,35 +635,29 @@ cmd_semantics (CmdBlk c1 c2) env k state =
     cmd_semantics c2 env k state'
   ) state
 
--- EscapeTo semantics
--- C[escapeto l] r c = E[l] r;Cc? λc'.c'
-cmd_semantics (EscapeTo label) env k state =
-  let (env', store, nl, input, output) = state
-      -- Create an immediate escape signal
-      escapeEnv = extendEnv label (ConstVal (Numeric 1)) env'
-  in Result [] (escapeEnv, store, nl, input, output)
-
 -- Trap semantics
--- C[trap C l₁:C₁,...,ln:Cn end] r c =
---   C[C] r(C[C₁] r c/l₁,...,C[Cn] r c/ln) c
-cmd_semantics (Trap body labels) env k state =
-  case cmd_semantics body env Stop state of
-    Result _ state'@(env', _, _, _, _) ->
-      -- Check if any label has been triggered
-      let findLabel l = case env' l of
-                         ConstVal (Numeric 1) -> True
-                         _ -> False
-          matchingLabels = filter (\(l, _) -> findLabel l) labels
-          -- Now unflag the escape label
-          resetEnv = extendEnv "escape" Unbound env'
-      in case matchingLabels of
-           [(_, labelCmd)] -> cmd_semantics labelCmd env k state'
-           -- [] -> k state'  -- No escape occurred
-           -- TODO : Show the attempted escape label
-           [] -> ErrorState $ "No matching escape label found"
-           _  -> ErrorState "Multiple matching escape labels found"
-    Stop s -> k s
-    ErrorState msg -> ErrorState msg
+-- C[trap C l₁:C₁,...,ln:Cn end] r c = C[C] r(C[C₁] r c/l₁,...,C[Cn] r c/ln) c
+cmd_semantics (Trap body handlers) env k state =
+    -- First, create continuations for each handler
+    let makeHandlerCont (label, handler) curEnv =
+            -- Create a continuation that will execute the handler
+            let handlerCont = \state' -> cmd_semantics handler env k state'
+            -- Bind this continuation to the label in environment
+            in extendEnv label (LabelDef handlerCont) curEnv
+
+        -- Extend environment with all handler continuations
+        handlerEnv = foldr makeHandlerCont env handlers
+
+    -- Now execute the body with the handler-extended environment
+    in cmd_semantics body handlerEnv k state
+
+-- Escapeto semantics following the book's equation:
+-- C[escapeto l] r c = lookup(l,r); c
+cmd_semantics (EscapeTo label) env k state =
+    case env label of
+        LabelDef cont -> cont state  -- Invoke cc if label found
+        _ -> ErrorState $
+             "No handler found for escape label: " ++ label
 
 
 -- Declaration Semantics (D)
