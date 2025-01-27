@@ -60,7 +60,7 @@ testCases =
       (unlines [
         "program",
         "  begin",
-        "    proc print (x), output x;",
+        "    proc print (x) -> output x;",
         "    print(10)",
         "  end"
       ])
@@ -76,7 +76,7 @@ testCases =
       (unlines [
         "program",
         "  begin",
-        "    fun inc (x), x+1;",
+        "    fun inc (x) ->  x+1;",
         "    output inc!(10)",
         "  end"
       ])
@@ -122,7 +122,7 @@ testCases =
       (unlines [
         "program",
         "  begin",
-        "    rec fun fact(n),",
+        "    rec fun fact(n) -> ",
         "    if n == 0 then 1",
         "    else n * fact!(n-1);",
         "    output fact!(10)",
@@ -197,7 +197,7 @@ testCases =
       (unlines [
         "program",
         "  begin",
-        "    proc badProc x,",  -- missing parentheses
+        "    proc badProc x -> ",  -- missing parentheses
         "    output x;",
         "    output 42",
         "  end"
@@ -238,7 +238,7 @@ testCases =
       (unlines [
         "program",
         "  begin",
-        "    fun add(x,y), x+y;",
+        "    fun add(x,y) ->  x+y;",
         "    var x = 1;",
         "    var y = 2;",
         "    var z = add!(1,2);",
@@ -254,7 +254,7 @@ testCases =
       (unlines [
         "program",
         "  begin",
-        "    fun add(x,y), x+y;",
+        "    fun add(x,y) ->  x+y;",
         "    var x = 1;",
         "    var y = 2;",
         "    var z = add!(x,y);",
@@ -270,7 +270,7 @@ testCases =
       (unlines [
         "program",
         "  begin",
-        "    rec fun fact(n),",
+        "    rec fun fact(n) -> ",
         "    if n == 0 then 1",
         "    else n * fact!(n-1);",
         "    output fact!(5)",
@@ -285,7 +285,7 @@ testCases =
       (unlines [
         "program",
         "  begin",
-        "    proc swap(a, b),",
+        "    proc swap(a, b) -> ",
         "      begin",
         "        var temp = a;",
         "        a := b;",
@@ -307,7 +307,7 @@ testCases =
       (unlines [
         "program",
         "  begin",
-        "    proc swap(var a, var b),",
+        "    proc swap(var a, var b) -> ",
         "      begin",
         "        var temp = a;",
         "        a := b;",
@@ -375,7 +375,7 @@ testCases =
         "  end"
       ])
       (Just [])
-      (Right $ ErrorState "Undefined identifier: x"),
+      (Right $ ErrorState "Undefined Identifier: x"),
 
     TestCase
     "Fails: division by zero (Interpreter)"
@@ -396,7 +396,7 @@ testCases =
       (unlines [
         "program",
         "  begin",
-        "    proc swap(var a, var b),",
+        "    proc swap(var a, var b) -> ",
         "      begin",
         "        var temp = a;",
         "        a := b;",
@@ -410,7 +410,7 @@ testCases =
         "  end"
       ])
       (Just [])
-      (Right $ ErrorState "Pass by reference argument must be an identifier"),
+      (Right $ ErrorState "Pass by reference argument must be a Location, got RValue Numeric 3"),
 
     TestCase
       "Fails: pass-by-reference with constant argument (Interpreter)"
@@ -418,7 +418,7 @@ testCases =
       (unlines [
         "program",
         "  begin",
-        "    proc swap(var a, var b),",
+        "    proc swap(var a, var b) -> ",
         "      begin",
         "        var temp = a;",
         "        a := b;",
@@ -432,7 +432,7 @@ testCases =
         "  end"
       ])
       (Just [])
-      (Right $ ErrorState "Pass by reference requires a variable, got: y")
+      (Right $ ErrorState "Pass by reference argument must be a Location, got RValue Numeric 10")
   ]
 
 testSuite :: Spec

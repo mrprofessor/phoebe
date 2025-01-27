@@ -17,7 +17,7 @@ Description of Programming Languages]]
   - [X] Blocks with multi-expressions
   - [X] Functions (Call by ref/value)
   - [X] Dynamic/Static binding
-  - [ ] Escapes and Jumps
+  - [X] Escapes and Jumps
   - [ ] Data structures
   - [ ] Iteration constructs
   - [ ] Types ??
@@ -37,12 +37,12 @@ Description of Programming Languages]]
 #+BEGIN_SRC
 program
 begin
-  var x = 10;
-  output x
+  proc print(str) -> output str;
+  print("Hello Pheobe")
 end
 #+END_SRC
 
-Output: =Stop with output: [Numeric 8]=
+Output: =Result: [Str "Hello Pheobe"]=
 
 *** Functions and Procedures
 :PROPERTIES:
@@ -51,14 +51,14 @@ Output: =Stop with output: [Numeric 8]=
 #+BEGIN_SRC
 program
 begin
-  fun add(x, y), x + y;
+  fun add(x, y) -> x + y;
   
   var result = add!(5, 3);
   output result
 end
 #+END_SRC
 
-Output: =Stop with output: [Numeric 8]=
+Output: =Result: [Numeric 8]=
 
 *** Control Structures
 :PROPERTIES:
@@ -67,17 +67,15 @@ Output: =Stop with output: [Numeric 8]=
 #+BEGIN_SRC
 program
 begin
-  begin
-    var x = 10;
-    if x > 5 then
-      output x
-    else
-      output 0
-  end
+  var x = 10;
+  if x > 5 then
+    output x
+  else
+    output 0
 end
 #+END_SRC
 
-Output: =Stop with output: [Numeric 10]=
+Output: =Result: [Numeric 10]=
 
 ** Development
 :PROPERTIES:

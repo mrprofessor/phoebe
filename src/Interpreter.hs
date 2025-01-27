@@ -1,9 +1,11 @@
 module Interpreter where
 import Parsing
+import Control.Exception
 import Data.List (find)
 import Debug.Trace (trace) -- For debugging
 import System.Environment (getArgs)
 import System.IO (hFlush, stdout)
+import System.IO.Unsafe (unsafePerformIO)
 
 -------------------------------------------------------------------------------
 -- PARSER
@@ -223,7 +225,7 @@ dec =
      symbol "("
      params <- parameters `sepby` (symbol ",")
      symbol ")"
-     symbol ","
+     symbol "->"
      body <- cmd
      return (Procedure name params body)
   +++
@@ -232,7 +234,7 @@ dec =
      symbol "("
      params <- parameters `sepby` (symbol ",")
      symbol ")"
-     symbol ","
+     symbol "->"
      body <- expr                     -- Functions return exps, not cmds
      return (Function name params body)
   +++
@@ -242,7 +244,7 @@ dec =
      symbol "("
      params <- parameters `sepby` (symbol ",")
      symbol ")"
-     symbol ","
+     symbol "->"
      body <- cmd
      return (RecProcedure name params body)
   +++
@@ -252,7 +254,7 @@ dec =
      symbol "("
      params <- parameters `sepby` (symbol ",")
      symbol ")"
-     symbol ","
+     symbol "->"
      body <- expr
      return (RecFunction name params body)
 
@@ -419,34 +421,30 @@ exp_semantics Read _ k = \store ->
 exp_semantics (Identifier ide) env k = \store ->
   case env ide of
     Unbound -> ErrorState $ "Undefined Identifier: " ++ ide
-    Location loc -> case store loc of
-      Unused -> ErrorState $ "Accessed unused memory location for: " ++ ide
-      SValue val -> k (RValue val) store
-    -- Location loc -> k (Location loc) store
+    Location loc -> k (Location loc) store
     RValue val -> k (RValue val) store
     _ -> ErrorState $ "Unexpected environment value for: " ++ ide
-    
 
 -- E[E1(E2)] r k = E[E1] r; Fun?λf.E[E2] r; f; k
 -- exp_semantics (CallFun funName args) env k = \store ->
-exp_semantics (CallFun funName args) env k = \store ->
-  case env funName of
+exp_semantics (CallFun funName args) callTimeEnv k = \store ->
+  case callTimeEnv funName of
     -- Step 1: Evaluate the function identifier
-    FunDef params body closureEnv ->
+    FunDef params body declTimeEnv ->
       if length params /= length args
       then ErrorState $ "Function " ++ funName ++ " expects "
                       ++ show (length params) ++ " arguments, got "
                       ++ show (length args)
       else
         -- Step 2: Evaluate the arguments
-        evalArgs args env store [] (\evaluatedArgs store' ->
+        evalArgs args callTimeEnv store [] (\evaluatedArgs store' ->
           -- Step 3: Bind Parameters to arguments in a new Environment
-          let extendedEnv = foldr (\(param, arg) env' ->
-                            upsertEnv param (RValue arg) env') closureEnv
-                            (zip (map getParamName params) evaluatedArgs)
+          let extendedEnv = foldr (\(param, envVal) env' ->
+                            upsertEnv (getParamName param) envVal env') declTimeEnv
+                            (zip params evaluatedArgs)
           in
             -- Step 4: Evaluate the function body with the extended env
-            exp_semantics body (staticMix extendedEnv env) k store'
+            exp_semantics body extendedEnv k store'
       )
     _ -> ErrorState $ "Undefined or invalid function: " ++ funName
 
@@ -466,8 +464,8 @@ exp_semantics (IfExp condition thenExp elseExp) env k = \store ->
 exp_semantics (BinOp op exp1 exp2) env k = \store ->
   exp_semantics exp1 env (\v' store' ->
     exp_semantics exp2 env (\v'' store'' ->
-      case (v', v'') of
-        (RValue (Numeric n1), RValue (Numeric n2)) ->
+      case (deref v' store'', deref v'' store'') of
+        (Numeric n1, Numeric n2) ->
           let result = case op of
                 -- Comparison operators
                 "<=" -> Boolean (n1 <= n2)
@@ -490,7 +488,7 @@ exp_semantics (BinOp op exp1 exp2) env k = \store ->
                Error err -> ErrorState err
                res       -> k (RValue res) store''
 
-        (RValue (Boolean b1), RValue (Boolean b2)) ->
+        (Boolean b1, Boolean b2) ->
           let result = case op of
                 -- Boolean operators
                 "==" -> Boolean (b1 == b2)
@@ -518,22 +516,20 @@ cmd_semantics (Assign (Identifier ide) rhs) env c = \store ->  -- lhs == Ide
     Location loc ->
       exp_semantics rhs env (\val2 store' ->
         case val2 of
-          RValue v ->
-            c (upsertStore loc (SValue v) store')
+          RValue v -> c (upsertStore loc (SValue v) store')
+          Location _ -> c (upsertStore loc (SValue (deref val2 store')) store')
           _ -> ErrorState "Invalid R-value on the right-hand side"
       ) store
     _ -> ErrorState "Invalid location on the left-hand side"
 
 cmd_semantics (Assign lhs rhs) env c = \store ->               -- lhs == Exp
   exp_semantics lhs env (\val1 store' ->
-    trace ("Store : " ++ show store') $
-    trace ("env x: " ++ show (env "x")) $
     case val1 of
       Location loc ->
         exp_semantics rhs env (\val2 store'' ->
           case val2 of
-            RValue v ->
-              c (upsertStore loc (SValue v) store'')
+            RValue v -> c (upsertStore loc (SValue v) store')
+            Location _ -> c (upsertStore loc (SValue (deref val2 store')) store')
             _ -> ErrorState "Invalid R-value on the right-hand side"
          ) store'
       _ -> ErrorState "Invalid location on the left-hand side"
@@ -545,33 +541,29 @@ cmd_semantics (Assign lhs rhs) env c = \store ->               -- lhs == Exp
 cmd_semantics (Output exp) env c = \store ->
   exp_semantics exp env (\val store' ->
     case val of
-      RValue v -> -- Ensure the value is an R-value
-        Result [v] (c store') -- Create a new Result with the value and pass the continuation
+      RValue v -> Result [v] (c store') -- Create a new Result with the value and pass the continuation
+      Location _ -> Result [deref val store'] (c store')
       _ -> ErrorState "Output expression must evaluate to an R-value"
   ) store
 
 -- (C3) Procedure Call:
 -- C[E1(E2)] r c = E[E1] r ; Proc? λp . E[E2] r ; p ; c
-cmd_semantics (CallProc procName args) env c = \store ->
-  case env procName of
-    -- Step 1: Evaluate the procedure identifier
-    ProcDef params body closureEnv ->
+cmd_semantics (CallProc procName args) callTimeEnv c = \store ->
+  -- Step 1: Evaluate the procedure identifier
+  case callTimeEnv procName of
+    ProcDef params body declTimeEnv ->
       if length params /= length args
       then ErrorState $ "Procedure " ++ procName ++ " expects "
                       ++ show (length params) ++ " arguments, got "
                       ++ show (length args)
       else
         -- Step 2: Evaluate the arguments
-        evalArgs args env store [] (\evaluatedArgs store' ->
+        evalArgs args callTimeEnv store [] (\envVals store' ->
           -- Step 3: Bind Parameters to arguments in a new Environment
-          let extendedEnv = foldr (\(param, arg) env' ->
-                            upsertEnv param (RValue arg) env') closureEnv
-                            (zip (map getParamName params) evaluatedArgs)
-          in
-            -- Step 4: Evaluate the procedure body with the extended env
-            cmd_semantics body (staticMix extendedEnv env) c store'
+          let (finalEnv, finalStore) = bindArgs (zip params envVals) store' declTimeEnv
+          -- Step 4: Evaluate the procedure body with the extended env
+          in cmd_semantics body finalEnv c finalStore
       )
-    _ -> ErrorState $ "Undefined or invalid procedure: " ++ procName
 
 -- (C4) Conditional: 
 -- C[if E then C1 else C2] r c = R[E] r ; Bool? ; cond(C[C1] r c, C[C2] r c)
@@ -647,8 +639,8 @@ dec_semantics (Constant ide exp) env u = \store ->
   exp_semantics exp env (\val store' ->
     case val of
       RValue v -> u (upsertEnv ide (RValue v) env) store'
-      _ -> ErrorState $ "Constant declaration must evaluate to an R-value "
-                      ++ ide
+      Location _ -> u (upsertEnv ide (RValue (deref val store')) env) store'
+      _ -> ErrorState $ "Constant declaration must evaluate to an R-value " ++ ide
   ) store
 
 -- (D2) Variable declaration:
@@ -660,8 +652,11 @@ dec_semantics (Variable ide exp) env u = \store ->
         let newLocation = allocate store'
             store''     = upsertStore newLocation (SValue v) store'
         in u (upsertEnv ide (Location newLocation) env) store''
-      _ -> ErrorState $ "Variable declaration must evaluate to an R-value"
-                      ++ ide
+      Location _ -> -- allocate a new location and copy the value
+        let newLocation = allocate store'
+            store''     = upsertStore newLocation (SValue (deref val store')) store'
+        in u (upsertEnv ide (Location newLocation) env) store''
+      _ -> ErrorState $ "Variable declaration must evaluate to an R-value" ++ ide
   ) store
 
 -- (D3) Procedure declaration:
@@ -704,10 +699,13 @@ dec_semantics (DecBlk d1 d2) env u = \store ->
 
 run :: String -> [Value] -> Ans
 run program input =
-    case sparse program of
-      ParseOk (Program cmd) ->
-        cmd_semantics cmd initEnv (\store -> Stop store) (initStore input)
-      ParseError msg -> ErrorState ("Parser Error: " ++ msg)
+    unsafePerformIO $ catch
+      (evaluate $ case sparse program of
+        ParseOk (Program cmd) ->
+          cmd_semantics cmd initEnv (\store -> Stop store) (initStore input)
+        ParseError msg -> ErrorState ("Parser Error: " ++ msg))
+      (\(e :: SomeException) ->    -- Show only the first line
+         return $ ErrorState $ takeWhile (/= '\n') $ show e)
 
 instance Show Ans where
     show (Stop store) = "Stop"
@@ -742,6 +740,14 @@ getParamName :: Args -> Ide
 getParamName (ValueParam name) = name
 getParamName (ReferenceParam name) = name
 
+-- Helper function to dereference an EnvVal to get its Value
+deref :: EnvVal -> Store -> Value
+deref envVal store = case envVal of
+  Location loc -> case store loc of
+                   SValue v -> v
+                   _ -> error "Invalid location"
+  RValue v -> v
+
 -- Helper function to find the next available location [FIXME :: Store NextLoc]
 allocate :: Store -> Integer
 -- allocate store = head [i | i <- [0..], store i == Unused]
@@ -763,11 +769,36 @@ showEnv :: [Ide] -> Env -> String
 showEnv keys env = unlines [key ++ " -> " ++ show (env key) | key <- keys]
 
 -- Helper function to evaluate Function/Procedure arguments
-evalArgs :: [Exp] -> Env -> Store -> [Value] -> ([Value] -> Store -> Ans) -> Ans
+evalArgs :: [Exp] -> Env -> Store -> [EnvVal] -> ([EnvVal] -> Store -> Ans) -> Ans
 evalArgs [] _ store evaluatedArgs k = k (reverse evaluatedArgs) store
 evalArgs (arg:rest) env store evaluatedArgs k =
   exp_semantics arg env (\val store' ->
     case val of
-      RValue v -> evalArgs rest env store' (v:evaluatedArgs) k
+      RValue v -> evalArgs rest env store' (RValue v:evaluatedArgs) k
+      Location loc -> evalArgs rest env store' (Location loc:evaluatedArgs) k
       _ -> ErrorState $ "Invalid function argument: " ++ show val
   ) store
+
+-- Helper function to bind arguments to parameters
+-- (call-by-value and call-by-reference)
+bindArgs :: [(Args, EnvVal)] -> Store -> Env -> (Env, Store)
+bindArgs paramArgs store env =
+  foldr (\(param, argVal) (env', store'') ->
+    case param of
+      -- For var parameters: verify and bind location directly
+      ReferenceParam name ->
+        case argVal of
+          Location loc -> (upsertEnv name (Location loc) env', store'')
+          _ -> error $ "Pass by reference argument must be a Location, got "
+                    ++ show argVal
+      -- For value parameters: deref and create new location
+      ValueParam name ->
+        let value = case argVal of
+                     Location loc -> case store'' loc of
+                                     SValue v -> v
+                                     _ -> error $ "Invalid location " ++ show loc
+                     RValue v -> v
+            newLoc = allocate store''
+            newStore = upsertStore newLoc (SValue value) store''
+        in (upsertEnv name (Location newLoc) env', newStore)
+  ) (env, store) paramArgs

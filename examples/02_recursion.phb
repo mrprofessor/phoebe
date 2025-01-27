@@ -1,6 +1,6 @@
 program
 begin
-  rec fun factorial(n),
+  rec fun factorial(n) ->
     if n == 0 then
       1
     else
