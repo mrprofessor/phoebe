@@ -1,6 +1,6 @@
 program 
 begin
-  fun add (x,y), x+y;
+  fun add (x,y) -> x+y;
   var x = 10;
   var y = 5;
   var z = add!(3, 5);
