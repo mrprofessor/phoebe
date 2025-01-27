@@ -233,10 +233,10 @@ dec =
      params <- parameters `sepby` (symbol ",")
      symbol ")"
      symbol ","
-     body <- expr          -- Functions return expressions, not commands
+     body <- expr                     -- Functions return exps, not cmds
      return (Function name params body)
   +++
-  do symbol "rec"          -- Recursive procedure
+  do symbol "rec"                     -- Recursive procedure
      symbol "proc"
      name <- token identifier
      symbol "("
@@ -246,7 +246,7 @@ dec =
      body <- cmd
      return (RecProcedure name params body)
   +++
-  do symbol "rec"          -- Recursive function
+  do symbol "rec"                     -- Recursive function
      symbol "fun"
      name <- token identifier
      symbol "("
@@ -291,8 +291,8 @@ program =
 sparse :: String -> ParsedResult
 sparse xs = case Parsing.parse program xs of
              [(result, [])]   -> ParseOk result
-             [(result, out_)] -> ParseError ("Unused input " ++ out_)
-             []               -> ParseError "Invalid input"
+             [(result, out_)] -> ParseError ("Unused Syntax " ++ out_)
+             []               -> ParseError "Invalid Syntax"
 
 
 
@@ -340,7 +340,7 @@ type Store = Integer -> StoreVal  -- Store = Loc -> [Sv + {unused}]
 
 -- Ans = {error, stop} + [Rv x Ans]
 data Ans
-  = Stop Store                   -- Final state of the program
+  = Stop Store                   -- Final store of the program
   | ErrorState String            -- Represents errors in execution
   | Result [Value] Ans           -- Result with continuation (list of R-values)
 
@@ -367,7 +367,7 @@ dynamicMix declEnv callEnv = callEnv
 inputLoc :: Integer
 inputLoc = 0  -- Reserve location 0 for input
 
--- Initialize the state with input, Input is stored in location 0
+-- Initialize the store with input, Input is stored in location 0
 initStore :: [Value] -> Store
 initStore input = \loc ->
   if loc == inputLoc
@@ -428,8 +428,27 @@ exp_semantics (Identifier ide) env k = \store ->
     
 
 -- E[E1(E2)] r k = E[E1] r; Fun?λf.E[E2] r; f; k
--- exp_semantics (CallFun funName args) env k = \store -> 
-
+-- exp_semantics (CallFun funName args) env k = \store ->
+exp_semantics (CallFun funName args) env k = \store ->
+  case env funName of
+    -- Step 1: Evaluate the function identifier
+    FunDef params body closureEnv ->
+      if length params /= length args
+      then ErrorState $ "Function " ++ funName ++ " expects "
+                      ++ show (length params) ++ " arguments, got "
+                      ++ show (length args)
+      else
+        -- Step 2: Evaluate the arguments
+        evalArgs args env store [] (\evaluatedArgs store' ->
+          -- Step 3: Bind Parameters to arguments in a new Environment
+          let extendedEnv = foldr (\(param, arg) env' ->
+                            upsertEnv param (RValue arg) env') closureEnv
+                            (zip (map getParamName params) evaluatedArgs)
+          in
+            -- Step 4: Evaluate the function body with the extended env
+            exp_semantics body (staticMix extendedEnv env) k store'
+      )
+    _ -> ErrorState $ "Undefined or invalid function: " ++ funName
 
 
 -- E[if E then E1 else E2] r k = R[E] r; Bool?; cond(E[E1] r k, E[E2] r k)
@@ -494,9 +513,7 @@ cmd_semantics :: Cmd -> Env -> Cc -> Cc
 
 -- (C1) Assignment:
 -- C[E1 := E2] r c = E[E1] r ; Loc? ; λl.(R[E2] r ; update l ; c)
-
--- When lhs == Ide
-cmd_semantics (Assign (Identifier ide) rhs) env c = \store ->
+cmd_semantics (Assign (Identifier ide) rhs) env c = \store ->  -- lhs == Ide
   case env ide of
     Location loc ->
       exp_semantics rhs env (\val2 store' ->
@@ -507,7 +524,7 @@ cmd_semantics (Assign (Identifier ide) rhs) env c = \store ->
       ) store
     _ -> ErrorState "Invalid location on the left-hand side"
 
-cmd_semantics (Assign lhs rhs) env c = \store ->
+cmd_semantics (Assign lhs rhs) env c = \store ->               -- lhs == Exp
   exp_semantics lhs env (\val1 store' ->
     trace ("Store : " ++ show store') $
     trace ("env x: " ++ show (env "x")) $
@@ -535,6 +552,26 @@ cmd_semantics (Output exp) env c = \store ->
 
 -- (C3) Procedure Call:
 -- C[E1(E2)] r c = E[E1] r ; Proc? λp . E[E2] r ; p ; c
+cmd_semantics (CallProc procName args) env c = \store ->
+  case env procName of
+    -- Step 1: Evaluate the procedure identifier
+    ProcDef params body closureEnv ->
+      if length params /= length args
+      then ErrorState $ "Procedure " ++ procName ++ " expects "
+                      ++ show (length params) ++ " arguments, got "
+                      ++ show (length args)
+      else
+        -- Step 2: Evaluate the arguments
+        evalArgs args env store [] (\evaluatedArgs store' ->
+          -- Step 3: Bind Parameters to arguments in a new Environment
+          let extendedEnv = foldr (\(param, arg) env' ->
+                            upsertEnv param (RValue arg) env') closureEnv
+                            (zip (map getParamName params) evaluatedArgs)
+          in
+            -- Step 4: Evaluate the procedure body with the extended env
+            cmd_semantics body (staticMix extendedEnv env) c store'
+      )
+    _ -> ErrorState $ "Undefined or invalid procedure: " ++ procName
 
 -- (C4) Conditional: 
 -- C[if E then C1 else C2] r c = R[E] r ; Bool? ; cond(C[C1] r c, C[C2] r c)
@@ -576,9 +613,27 @@ cmd_semantics (CmdBlk c1 c2) env c = \store ->
 
 -- Trap semantics:
 -- C[trap C l₁:C₁,...,ln:Cn end] r c = C[C] r(C[C₁] r c/l₁,...,C[Cn] r c/ln) c
+cmd_semantics (Trap body handlers) env c = \store ->
+    -- First, create continuations for each handler
+    let createLabelContinuation (label, handler) curEnv =
+            -- Create a continuation that will execute the handler
+            let handlerCont = \store' -> cmd_semantics handler env c store'
+            -- Bind this continuation to the label in environment
+            in upsertEnv label (LabelDef handlerCont) curEnv
+
+        -- Extend environment with all handler continuations
+        handlerEnv = foldr createLabelContinuation env handlers
+
+    -- Now execute the body with the handler-extended environment
+    in cmd_semantics body handlerEnv c store
 
 -- Escapeto semantics:
 -- C[escapeto l] r c = lookup(l,r); c
+cmd_semantics (EscapeTo label) env c = \store ->
+  case env label of
+    LabelDef continuation -> continuation store  -- Invoke Cc if label found
+    _ -> ErrorState $
+         "No handler found for escape label: " ++ label
 
 -- Declaration Semantics (D)
 -- ----------------------------------------------------------------------------
@@ -609,13 +664,39 @@ dec_semantics (Variable ide exp) env u = \store ->
                       ++ ide
   ) store
 
+-- (D3) Procedure declaration:
+-- D[proc I(I1); C] r u = u(p/I) where p = (λc e . C[C] r[e/I1] c)
+dec_semantics (Procedure name params body) env u = \store ->
+  let procDef = ProcDef params body env
+      env' = upsertEnv name procDef env
+  in u env' store
+
+-- Recursive Procedure
+dec_semantics (RecProcedure name params body) env u = \store ->
+  let procDef = ProcDef params body env'
+      env' = upsertEnv name procDef env      -- lazy recursive binding of env'
+  in u env' store
+
+-- (D4) Function declaration:
+-- D[fun I(I1); E] r u = u(f/I) where f = (λk e . E[E] r[e/I] k)/I)
+dec_semantics (Function name params body) env u = \store ->
+  let funDef = FunDef params body env   -- Create the closure for recursion
+      env' = upsertEnv name funDef env  -- extendedEnv with the new closure
+  in u env' store
+
+-- Recursive Function
+-- D[fun I(I1); E] r u = u(f/I) where rec f = (λk e . E[E] r[f,e/I,I1] k)/I)
+dec_semantics (RecFunction name params body) env u = \store ->
+  let funDef = FunDef params body env'
+      env' = upsertEnv name funDef env  -- lazy recursive binding of env'
+  in u env' store
+
 -- (D5) Sequence of declarations:
 -- D[D1;D2] r u = D[D1] r λr₁ . D[D2] r[r1] λr2 . u(r1[r2])
 dec_semantics (DecBlk d1 d2) env u = \store ->
   dec_semantics d1 env (\extendedEnv store' ->
     dec_semantics d2 extendedEnv u store'
   ) store
-
 
 
 -- Run Interpreter
@@ -638,7 +719,6 @@ flattenResults (Result values nextAns) = values ++ flattenResults nextAns
 flattenResults (ErrorState msg) = [Str ("Error: " ++ msg)] -- Add err As Value
 flattenResults (Stop _) = []        -- Stop accumulating at Stop
 
--- ++ ", State: " ++ show state
 instance Show EnvVal where
   show (Location loc) = "Location " ++ show loc
   show (RValue val) = "RValue " ++ show val
@@ -681,3 +761,13 @@ upsertEnv ide val env = \key -> if key == ide then val else env key
 -- Helper function to display environment
 showEnv :: [Ide] -> Env -> String
 showEnv keys env = unlines [key ++ " -> " ++ show (env key) | key <- keys]
+
+-- Helper function to evaluate Function/Procedure arguments
+evalArgs :: [Exp] -> Env -> Store -> [Value] -> ([Value] -> Store -> Ans) -> Ans
+evalArgs [] _ store evaluatedArgs k = k (reverse evaluatedArgs) store
+evalArgs (arg:rest) env store evaluatedArgs k =
+  exp_semantics arg env (\val store' ->
+    case val of
+      RValue v -> evalArgs rest env store' (v:evaluatedArgs) k
+      _ -> ErrorState $ "Invalid function argument: " ++ show val
+  ) store

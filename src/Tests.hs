@@ -6,12 +6,8 @@ instance Eq ParsedResult where
   (ParseOk p1) == (ParseOk p2) = show p1 == show p2
   (ParseError e1) == (ParseError e2) = e1 == e2
   _ == _ = False
-
 instance Eq Ans where
-  Stop (_, _, _, _, output1) == Stop (_, _, _, _, output2) = output1 == output2
-  ErrorState msg1 == ErrorState msg2 = msg1 == msg2
-  _ == _ = False
-
+  ans1 == ans2 = flattenResults ans1 == flattenResults ans2
 
 data TestType = ParserTest | InterpreterTest
 
@@ -154,7 +150,7 @@ testCases =
         "  end"
       ])
       Nothing
-      (Left $ ParseError "Invalid input"),
+      (Left $ ParseError "Invalid Syntax"),
 
     TestCase
       "Fails: missing declarations in BeginEnd (Parser)"
@@ -166,7 +162,7 @@ testCases =
         "  end"
       ])
       Nothing
-      (Left $ ParseError "Invalid input"),
+      (Left $ ParseError "Invalid Syntax"),
 
     TestCase
       "Fails: missing variable declaration keyword (Parser)"
@@ -179,7 +175,7 @@ testCases =
         "  end"
       ])
       Nothing
-      (Left $ ParseError "Invalid input"),
+      (Left $ ParseError "Invalid Syntax"),
 
     TestCase
       "Fails: missing semicolon (Parser)"
@@ -193,7 +189,7 @@ testCases =
         "  end"
       ])
       Nothing
-      (Left $ ParseError "Invalid input"),
+      (Left $ ParseError "Invalid Syntax"),
 
     TestCase
       "Fails: incorrect procedure syntax (Parser)"
@@ -207,7 +203,7 @@ testCases =
         "  end"
       ])
       Nothing
-      (Left $ ParseError "Invalid input"),
+      (Left $ ParseError "Invalid Syntax"),
 
     -- Interpreter Tests
     TestCase
@@ -221,7 +217,7 @@ testCases =
         "  end"
       ])
       (Just [])
-      (Right $ Stop (defaultEnv, defaultStore, 1, [], [Numeric 42])),
+      (Right $ Result [Numeric 42] (Stop (initStore []))),
 
     TestCase
       "Passes: constant declaration and output (Interpreter)"
@@ -234,7 +230,7 @@ testCases =
         "  end"
       ])
       (Just [])
-      (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 100])),
+      (Right $ Result [Numeric 100] (Stop (initStore []))),
 
     TestCase
       "Passes: function declaration and assignment (Interpreter)"
@@ -250,7 +246,7 @@ testCases =
         "  end"
       ])
     (Just [])
-      (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 3])),
+      (Right $ Result [Numeric 3] (Stop (initStore []))),
 
     TestCase
       "Passes: function declaration and dynamic binding (Interpreter)"
@@ -266,7 +262,7 @@ testCases =
         "  end"
       ])
       (Just [])
-      (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 3])),
+      (Right $ Result [Numeric 3] (Stop (initStore []))),
 
     TestCase
       "Passes: factorial function with call (Interpreter)"
@@ -281,7 +277,7 @@ testCases =
         "  end"
       ])
       (Just [])
-      (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 120])),
+      (Right $ Result [Numeric 120] (Stop (initStore []))),
 
     TestCase
       "Passes: procedure with pass-by-value parameters (Interpreter)"
@@ -303,7 +299,7 @@ testCases =
         "  end"
       ])
       (Just [])
-      (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 5, Numeric 10])),
+      (Right $ Result [Numeric 5, Numeric 10] (Stop (initStore []))),
 
     TestCase
       "Passes: procedure with pass-by-reference parameters (Interpreter)"
@@ -325,7 +321,7 @@ testCases =
         "  end"
       ])
       (Just [])
-      (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 10, Numeric 5])),
+      (Right $ Result [Numeric 10, Numeric 5] (Stop (initStore []))),
 
     TestCase
       "Passes: trap block with escapeto (Interpreter)"
@@ -344,7 +340,7 @@ testCases =
         "  end"
       ])
       (Just [])
-      (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 1, Numeric 100])),
+      (Right $ Result [Numeric 1, Numeric 100] (Stop (initStore []))),
 
     TestCase
       "Passes: trap with conditional escapeto (Interpreter)"
@@ -365,7 +361,7 @@ testCases =
         "  end"
       ])
       (Just [])
-      (Right $ Stop (defaultEnv, defaultStore, 0, [], [Numeric 10])),
+      (Right $ Result [Numeric 10] (Stop (initStore []))),
 
     -- Error cases
     TestCase
