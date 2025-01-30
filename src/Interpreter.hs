@@ -1,302 +1,9 @@
 module Interpreter where
-import Parsing
+import Parser
 import Control.Exception
 import Data.List (find)
 import Debug.Trace (trace) -- For debugging
-import System.Environment (getArgs)
-import System.IO (hFlush, stdout)
 import System.IO.Unsafe (unsafePerformIO)
-
--------------------------------------------------------------------------------
--- PARSER
--------------------------------------------------------------------------------
-
-type Ide = String
-
--- P ::= program C
-data Program = Program Cmd
-  deriving Show
-
--- E :: = B | true | false | read | I | E1 (E2) | if E then E1 else E2 | E O E2
-data Exp
-  = Number Integer
-  | Bool Bool
-  | String String
-  | Read
-  | Identifier Ide
-  | CallFun Ide [Exp]                 -- Later support CallFun Exp [Exp]
-  | IfExp Exp Exp Exp
-  | BinOp String Exp Exp
-  deriving Show
-
--- C::= E1 := E2 | output E | E1(E2) | if E then C1 else C2 | while E do C | begin D;C end | C1 ;C2
-data Cmd
-  = Assign Exp Exp
-  | Output Exp
-  | CallProc Ide [Exp]                -- Later support CallProc Exp [Exp]
-  | IfCmd Exp Cmd Cmd
-  | WhileDo Exp Cmd
-  | BeginEnd Dec Cmd
-  | CmdBlk Cmd Cmd
-  | Trap Cmd [(Ide, Cmd)]             -- trap C [I1: C1, I2: C2, ...] end
-  | EscapeTo Ide
-  | Label Ide Cmd
-  deriving Show
-
--- D ::= const I = E | var I = E | proc I(I1),C | fun I(I1),E | D1;D2
-data Dec
-  = Constant Ide Exp
-  | Variable Ide Exp
-  | Procedure Ide [Args] Cmd          -- Regular procedure
-  | RecProcedure Ide [Args] Cmd       -- Recursive procedure
-  | Function Ide [Args] Exp           -- Regular function
-  | RecFunction Ide [Args] Exp        -- Recursive function
-  | DecBlk Dec Dec
-  deriving Show
-
-data ParsedResult
-  = ParseOk Program
-  | ParseError String
-  deriving Show
-
-data Args
-  = ValueParam Ide                    -- Pass-by-value
-  | ReferenceParam Ide                -- Pass-by-reference
-  deriving Show
-
-binop :: Parser String
-binop = do   symbol "<="  ; return "<="
-      +++ do symbol ">="  ; return ">="
-      +++ do symbol "=="  ; return "=="
-      +++ do symbol "+"   ; return "+"
-      +++ do symbol "-"   ; return "-"
-      +++ do symbol "*"   ; return "*"
-      +++ do symbol "/"   ; return "/"
-      +++ do symbol "%"   ; return "%"
-      +++ do symbol "<"   ; return "<"
-      +++ do symbol ">"   ; return ">"
-
-expr :: Parser Exp
-expr =
-  do e1 <- term
-     op <- binop
-     e2 <- expr
-     return (BinOp op e1 e2)
-  +++
-  do symbol "if"
-     cond <- expr
-     symbol "then"
-     thenCmd <- expr
-     symbol "else"
-     elseCmd <- expr
-     return (IfExp cond thenCmd elseCmd)
-  +++
-  do name <- token identifier
-     symbol "!"
-     symbol "("
-     args <- expr `sepby` (symbol ",")
-     symbol ")"
-     return (CallFun name args)
-  +++
-  term
-
-term :: Parser Exp
-term = factor
-
-factor :: Parser Exp
-factor =
-  do n <- nat
-     return (Number (toInteger n))
-  +++
-  do symbol "\""
-     s <- many (sat (/= '\"'))
-     symbol "\""
-     return (String s)
-  +++
-  do symbol "true"
-     return (Bool True)
-  +++
-  do symbol "false"
-     return (Bool False)
-  +++
-  do symbol "read"
-     return Read
-  +++
-  do id <- token identifier
-     return (Identifier id)
-  +++
-  do symbol "("
-     e <- expr
-     symbol ")"
-     return e
-
-cmd :: Parser Cmd
-cmd =
-  do symbol "output"
-     e <- expr
-     return (Output e)
-  +++
-  do leftExp <- expr
-     symbol ":="
-     rightExp <- expr
-     return (Assign leftExp rightExp)
-  +++
-  do symbol "begin"
-     decs <- decBlk
-     symbol ";"                       -- Mandatory ; after declarations
-     cmds <- cmdBlk
-     symbol "end"
-     return (BeginEnd decs cmds)
-  +++
-  do symbol "while"
-     cond <- expr
-     symbol "do"
-     action <- cmd
-     return (WhileDo cond action)
-  +++
-  do symbol "if"
-     cond <- expr
-     symbol "then"
-     thenCmd <- cmd
-     symbol "else"
-     elseCmd <- cmd
-     return (IfCmd cond thenCmd elseCmd)
-  +++
-  do name <- token identifier
-     symbol "("
-     args <- expr `sepby` (symbol ",")
-     symbol ")"
-     return (CallProc name args)
-  +++
-  do symbol "{"
-     c <- cmdBlk
-     symbol "}"
-     return c
-  +++
-  do symbol "trap"
-     body <- cmdBlk
-     labels <- sepby (do
-       l <- token identifier
-       symbol ":"
-       c <- cmd
-       return (l, c)) (symbol ",")
-     symbol "end"
-     return (Trap body labels)
-  +++
-  do symbol "escapeto"
-     label <- token identifier
-     return (EscapeTo label)
-  +++
-  do name <- token identifier
-     symbol ":"
-     rest <- cmd
-     return (Label name rest)
-
--- Sequence of commands
-cmdBlk :: Parser Cmd
-cmdBlk =
-  do c1 <- cmd
-     (do symbol ";"
-         rest <- cmdBlk
-         return (CmdBlk c1 rest)
-      -- +++                          -- Make ; optional for the last command
-      -- do symbol ";"
-      --    return c1)
-      +++
-      return c1)
-
--- Declaration parsers
-dec :: Parser Dec
-dec =
-  do symbol "var"
-     id <- token identifier
-     symbol "="
-     e <- expr
-     return (Variable id e)
-  +++
-  do symbol "const"
-     id <- token identifier
-     symbol "="
-     e <- expr
-     return (Constant id e)
-  +++
-  do symbol "proc"
-     name <- token identifier
-     symbol "("
-     params <- parameters `sepby` (symbol ",")
-     symbol ")"
-     symbol "->"
-     body <- cmd
-     return (Procedure name params body)
-  +++
-  do symbol "fun"
-     name <- token identifier
-     symbol "("
-     params <- parameters `sepby` (symbol ",")
-     symbol ")"
-     symbol "->"
-     body <- expr                     -- Functions return exps, not cmds
-     return (Function name params body)
-  +++
-  do symbol "rec"                     -- Recursive procedure
-     symbol "proc"
-     name <- token identifier
-     symbol "("
-     params <- parameters `sepby` (symbol ",")
-     symbol ")"
-     symbol "->"
-     body <- cmd
-     return (RecProcedure name params body)
-  +++
-  do symbol "rec"                     -- Recursive function
-     symbol "fun"
-     name <- token identifier
-     symbol "("
-     params <- parameters `sepby` (symbol ",")
-     symbol ")"
-     symbol "->"
-     body <- expr
-     return (RecFunction name params body)
-
-parameters :: Parser Args
-parameters =
-  do symbol "var"
-     paramName <- identifier
-     return (ReferenceParam paramName)
-  +++
-  do paramName <- identifier
-     return (ValueParam paramName)
-
--- Sequence of Declarations
-decBlk :: Parser Dec
-decBlk =
-  do d1 <- dec
-     (do symbol ";"
-         rest <- decBlk
-         return (DecBlk d1 rest)
-      -- +++                          -- Make ; optional for the last dec
-      -- do symbol ";"
-      --    return d1
-      +++
-      return d1)
-
--- Program parser
--- Program ::= program C
-program :: Parser Program
-program =
-  do symbol "program"
-     c <- cmd
-     return (Program c)
-
-
--- Main parse function
-sparse :: String -> ParsedResult
-sparse xs = case Parsing.parse program xs of
-             [(result, [])]   -> ParseOk result
-             [(result, out_)] -> ParseError ("Unused Syntax " ++ out_)
-             []               -> ParseError "Invalid Syntax"
-
-
 
 -------------------------------------------------------------------------------
 -- INTERPRETER
@@ -420,9 +127,9 @@ exp_semantics Read _ k = \store ->
 --   Otherwise -> k (r I)
 exp_semantics (Identifier ide) env k = \store ->
   case env ide of
-    Unbound -> ErrorState $ "Undefined Identifier: " ++ ide
     Location loc -> k (Location loc) store
     RValue val -> k (RValue val) store
+    Unbound -> ErrorState $ "Undefined Identifier: " ++ ide
     _ -> ErrorState $ "Unexpected environment value for: " ++ ide
 
 -- E[E1(E2)] r k = E[E1] r; Fun?λf.E[E2] r; f; k
@@ -535,13 +242,13 @@ cmd_semantics (Assign lhs rhs) env c = \store ->               -- lhs == Exp
       _ -> ErrorState "Invalid location on the left-hand side"
   ) store
 
-
 -- (C2) Output:
 -- C[output E] r c = R[E] r λe s. (e, s)
 cmd_semantics (Output exp) env c = \store ->
   exp_semantics exp env (\val store' ->
     case val of
-      RValue v -> Result [v] (c store') -- Create a new Result with the value and pass the continuation
+      -- Create a new Result with the value and pass the continuation
+      RValue v -> Result [v] (c store')
       Location _ -> Result [deref val store'] (c store')
       _ -> ErrorState "Output expression must evaluate to an R-value"
   ) store
@@ -588,7 +295,6 @@ cmd_semantics (WhileDo condition body) env c = \store ->
                       ++ show conditionVal
   ) store
                                 
-
 -- (C6) Begin End Block:
 -- C[begin D;C end] r c = D[D] r λr'.C[C] r[r'] c
 cmd_semantics (BeginEnd decs cmds) env c = \store ->
@@ -606,18 +312,18 @@ cmd_semantics (CmdBlk c1 c2) env c = \store ->
 -- Trap semantics:
 -- C[trap C l₁:C₁,...,ln:Cn end] r c = C[C] r(C[C₁] r c/l₁,...,C[Cn] r c/ln) c
 cmd_semantics (Trap body handlers) env c = \store ->
-    -- First, create continuations for each handler
-    let createLabelContinuation (label, handler) curEnv =
-            -- Create a continuation that will execute the handler
-            let handlerCont = \store' -> cmd_semantics handler env c store'
-            -- Bind this continuation to the label in environment
-            in upsertEnv label (LabelDef handlerCont) curEnv
+  -- First, create continuations for each handler
+  let createLabelContinuation (label, handler) curEnv =
+        -- Create a continuation that will execute the handler
+        let handlerCont = \store' -> cmd_semantics handler env c store'
+        -- Bind this continuation to the label in environment
+        in upsertEnv label (LabelDef handlerCont) curEnv
 
-        -- Extend environment with all handler continuations
-        handlerEnv = foldr createLabelContinuation env handlers
+      -- Extend environment with all handler continuations
+      handlerEnv = foldr createLabelContinuation env handlers
 
-    -- Now execute the body with the handler-extended environment
-    in cmd_semantics body handlerEnv c store
+  -- Now execute the body with the handler-extended environment
+  in cmd_semantics body handlerEnv c store
 
 -- Escapeto semantics:
 -- C[escapeto l] r c = lookup(l,r); c
@@ -675,8 +381,8 @@ dec_semantics (RecProcedure name params body) env u = \store ->
 -- (D4) Function declaration:
 -- D[fun I(I1); E] r u = u(f/I) where f = (λk e . E[E] r[e/I] k)/I)
 dec_semantics (Function name params body) env u = \store ->
-  let funDef = FunDef params body env   -- Create the closure for recursion
-      env' = upsertEnv name funDef env  -- extendedEnv with the new closure
+  let funDef = FunDef params body env   -- Create function closure
+      env' = upsertEnv name funDef env  -- Extend environment with closure
   in u env' store
 
 -- Recursive Function
@@ -717,6 +423,7 @@ flattenResults (Result values nextAns) = values ++ flattenResults nextAns
 flattenResults (ErrorState msg) = [Str ("Error: " ++ msg)] -- Add err As Value
 flattenResults (Stop _) = []        -- Stop accumulating at Stop
 
+-- Debug helpers
 instance Show EnvVal where
   show (Location loc) = "Location " ++ show loc
   show (RValue val) = "RValue " ++ show val
@@ -745,7 +452,7 @@ deref :: EnvVal -> Store -> Value
 deref envVal store = case envVal of
   Location loc -> case store loc of
                    SValue v -> v
-                   _ -> error "Invalid location"
+                   _ -> error $ "Invalid location " ++ show loc
   RValue v -> v
 
 -- Helper function to find the next available location [FIXME :: Store NextLoc]
@@ -794,11 +501,10 @@ bindArgs paramArgs store env =
       -- For value parameters: deref and create new location
       ValueParam name ->
         let value = case argVal of
-                     Location loc -> case store'' loc of
-                                     SValue v -> v
-                                     _ -> error $ "Invalid location " ++ show loc
+                     Location loc -> deref argVal store''
                      RValue v -> v
             newLoc = allocate store''
             newStore = upsertStore newLoc (SValue value) store''
         in (upsertEnv name (Location newLoc) env', newStore)
   ) (env, store) paramArgs
+

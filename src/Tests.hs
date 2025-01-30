@@ -1,4 +1,5 @@
 import Test.Hspec
+import Parser
 import Interpreter
 
 -- Equality Clauses for test
