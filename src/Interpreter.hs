@@ -17,26 +17,28 @@ import System.IO.Unsafe (unsafePerformIO)
 
 -- Rv = Bool + Bv (basic values and booleans)
 data Value 
-  = Numeric Integer              -- Represents basic values (Bv)
-  | Boolean Bool                 -- Represents boolean values (Bool)
-  | Str String                   -- Represents string values (String)
-  | Error String                 -- Represents Errors as Value (Error)
+  = Numeric Integer                    -- Represents basic values (Bv)
+  | Boolean Bool                       -- Represents boolean values (Bool)
+  | Str String                         -- Represents string values (String)
+  | Error String                       -- Represents Errors as Value (Error)
   deriving (Eq, Show)
 
 -- Denotable Values: Dv = Loc + Rv + Proc + Fun
 data EnvVal
-  = Location Integer             -- Represents locations (Loc)
-  | RValue Value                 -- Represents R-values (Rv)
-  | ProcDef [Args] Cmd Env       -- Represents procedures (Proc)
-  | FunDef [Args] Exp Env        -- Represents functions (Fun)
-  | LabelDef Cc                  -- Represents Label definations (Label)
-  | Unbound                      -- Represents unbound identifiers
+  = Location Integer                   -- Represents locations (Loc)
+  | RValue Value                       -- Represents R-values (Rv)
+  | ProcDef [Args] Cmd Env             -- Represents procedures (Proc)
+  | FunDef [Args] Exp Env              -- Represents functions (Fun)
+  | ArrayVal Integer Integer [Integer] -- (lb, ub, list of locations)
+  | LabelDef Cc                        -- Represents Label definations (Label)
+  | Unbound                            -- Represents unbound identifiers
 
 -- Sv = File + Rv
 data StoreVal
-  = File [Value]                 -- Represents files (File = Rv*)
-  | SValue Value                 -- Represents Rv
-  | Unused                       -- Represents {unused} in Store
+  = File [Value]                       -- Represents files (File = Rv*)
+  | SValue Value                       -- Represents Rv
+  | ReservedArr                        -- Represents reserved array locations
+  | Unused                             -- Represents {unused} in Store
   deriving Eq
 
 -- Ev = Dv (Expressible Values e) (Not Required)
@@ -129,7 +131,7 @@ exp_semantics (Identifier ide) env k = \store ->
   case env ide of
     Location loc -> k (Location loc) store
     RValue val -> k (RValue val) store
-    Unbound -> ErrorState $ "Undefined Identifier: " ++ ide
+    ArrayVal _ _ _ -> k (env ide) store
     _ -> ErrorState $ "Unexpected environment value for: " ++ ide
 
 -- E[E1(E2)] r k = E[E1] r; Fun?λf.E[E2] r; f; k
@@ -209,6 +211,26 @@ exp_semantics (BinOp op exp1 exp2) env k = \store ->
     ) store'
   ) store
 
+-- Semantic function for array access:
+-- E[E₁[E₂]] r k = E[E₁] r λa.E[E₂] r λe.
+--   isNum e -> (between(n₁,n₂) e -> k(l[e-n₁+1]),err),err
+exp_semantics (ArrayAccess array idx) env k = \store ->
+  case array of
+    Identifier arrName ->
+      case env arrName of
+        ArrayVal lb ub locs ->
+          exp_semantics idx env (\idxVal store2 ->
+            case idxVal of
+              RValue (Numeric i) ->
+                case subscript lb ub locs i of
+                  Right loc -> k (Location loc) store2
+                  Left err -> ErrorState err
+              _ -> ErrorState "Array index must be numeric"
+          ) store
+        _ -> ErrorState $ "Not an array: " ++ arrName
+    _ -> ErrorState "Invalid array identifier"
+
+
 
 -- Command Semantics (C)
 -- ----------------------------------------------------------------------------
@@ -229,27 +251,52 @@ cmd_semantics (Assign (Identifier ide) rhs) env c = \store ->  -- lhs == Ide
       ) store
     _ -> ErrorState "Invalid location on the left-hand side"
 
-cmd_semantics (Assign lhs rhs) env c = \store ->               -- lhs == Exp
-  exp_semantics lhs env (\val1 store' ->
-    case val1 of
-      Location loc ->
-        exp_semantics rhs env (\val2 store'' ->
-          case val2 of
-            RValue v -> c (upsertStore loc (SValue v) store')
-            Location _ -> c (upsertStore loc (SValue (deref val2 store')) store')
-            _ -> ErrorState "Invalid R-value on the right-hand side"
-         ) store'
-      _ -> ErrorState "Invalid location on the left-hand side"
-  ) store
+-- Semantic function for array element assignment
+cmd_semantics (Assign (ArrayAccess array idx) rhs) env c = \store ->
+  case array of
+    Identifier arrName ->
+      case env arrName of
+        ArrayVal lb ub locs ->
+          exp_semantics idx env (\idxVal store' ->
+            case idxVal of
+              RValue (Numeric i) ->
+                if between lb ub i
+                then
+                    let offset = fromIntegral (i - lb)
+                        loc = locs !! fromIntegral offset
+                    in exp_semantics rhs env (\rhsVal store'' ->
+                         case rhsVal of
+                           RValue v -> c (upsertStore loc (SValue v) store'')
+                           Location l -> c (upsertStore loc (store'' l) store'')
+                           _ -> ErrorState "Invalid assignment value"
+                          ) store'
+                else ErrorState $ "Array index " ++ show i
+                                ++ " out of bounds ["
+                                ++ show lb ++ ".." ++ show ub ++ "]"
+              _ -> ErrorState "Array index must be numeric"
+            ) store
+        _ -> ErrorState $ "Array `" ++ show array ++ "` not found in environment"
+    _ -> ErrorState $ "Invalid array identifier"
+
 
 -- (C2) Output:
 -- C[output E] r c = R[E] r λe s. (e, s)
 cmd_semantics (Output exp) env c = \store ->
+  trace "Store before output :: " $ trace (show store) $
   exp_semantics exp env (\val store' ->
     case val of
       -- Create a new Result with the value and pass the continuation
       RValue v -> Result [v] (c store')
       Location _ -> Result [deref val store'] (c store')
+      ArrayVal lb ub locs ->
+        -- When outputting an array, output all its elements
+        let values = map (\loc ->
+              case store' loc of
+                SValue v -> v
+                ReservedArr -> Error "Unassigned"
+                _ -> Error "Invalid Value"  -- Invalid Value
+              ) locs
+        in Result values (c store')
       _ -> ErrorState "Output expression must evaluate to an R-value"
   ) store
 
@@ -399,6 +446,21 @@ dec_semantics (DecBlk d1 d2) env u = \store ->
     dec_semantics d2 extendedEnv u store'
   ) store
 
+-- Semantic function for array declaration
+-- D[array I[E1;E2]] r u = E[E1] r \n1.E[E2] r \n2. (news n1,n2) k
+dec_semantics (Array ide exp1 exp2) env u = \store ->
+  -- Evaluate lower bound
+  exp_semantics exp1 env (\val1 store1 ->
+    -- Evaluate upper bound
+    exp_semantics exp2 env (\val2 store2 ->
+      case (val1, val2) of
+        (RValue (Numeric lb), RValue (Numeric ub)) ->
+          newarray lb ub (\arrayVal store' ->
+            u (upsertEnv ide arrayVal env) store') store2
+        _ -> ErrorState "Array bounds must be numeric"
+    ) store1
+  ) store
+
 
 -- Run Interpreter
 -- ----------------------------------------------------------------------------
@@ -432,11 +494,12 @@ instance Show EnvVal where
   show Unbound = "Unbound"
 
 instance Show Store where
-  show store = "Store: " ++ show [(i, store i) | i <- [0..10]]
+  show store = "Store: " ++ show [(i, store i) | i <- [0..20]]
 
 instance Show StoreVal where
   show (File values) = "File: " ++ show values
   show (SValue value)  = "SValue: " ++ show value
+  show ReservedArr = "ReservedArr"
   show Unused        = "Unused"
 
 -- Helper Functions
@@ -452,16 +515,25 @@ deref :: EnvVal -> Store -> Value
 deref envVal store = case envVal of
   Location loc -> case store loc of
                    SValue v -> v
+                   ReservedArr -> Error "Unassigned"
                    _ -> error $ "Invalid location " ++ show loc
   RValue v -> v
 
 -- Helper function to find the next available location [FIXME :: Store NextLoc]
-allocate :: Store -> Integer
 -- allocate store = head [i | i <- [0..], store i == Unused]
+-- allocate :: Store -> Integer
+-- allocate store =
+--   case find (\i -> store i == Unused) [0..] of
+--     Just loc -> loc
+--     Nothing -> error "No unused memory locations available"
+
+allocate :: Store -> Integer
 allocate store =
-  case find (\i -> store i == Unused) [0..] of
-    Just loc -> loc
+  case find (\i -> store i == Unused) [1..] of  -- Start from 1 since 0 is for input
+    Just loc -> max loc (maxLocation store + 1)  -- Always use a new location
     Nothing -> error "No unused memory locations available"
+  where
+    maxLocation s = maximum [i | i <- [0..100], s i /= Unused]  -- Find highest used location
 
 -- Helper function to update/insert the store
 upsertStore :: Integer -> StoreVal -> Store -> Store
@@ -501,10 +573,44 @@ bindArgs paramArgs store env =
       -- For value parameters: deref and create new location
       ValueParam name ->
         let value = case argVal of
-                     Location loc -> deref argVal store''
-                     RValue v -> v
+              Location loc -> deref (Location loc) store''
+              RValue v -> v
+              _ -> error "Invalid value parameter"
             newLoc = allocate store''
             newStore = upsertStore newLoc (SValue value) store''
         in (upsertEnv name (Location newLoc) env', newStore)
   ) (env, store) paramArgs
 
+-- Helper to check if a value is between bounds (inclusive)
+between :: Integer -> Integer -> Integer -> Bool
+between n1 n2 e = n1 <= e && e <= n2
+
+-- Array Helper Functions
+-- ----------------------------------------------------------------------------
+-- news: Num -> Store -> ([Loc] × Store) + {error}
+news :: Integer -> Store -> Either String ([Integer], Store)
+news n store
+  | n <= 0 = Left "Number of locations must be positive"
+  | otherwise =
+      -- Find first unused location
+      let firstLoc = allocate store
+          locs = [firstLoc..(firstLoc + n - 1)]
+          newStore = foldr (\loc s -> upsertStore loc ReservedArr s) store locs
+      in Right (locs, newStore)
+
+-- newarray: [Num × Num] -> Ec -> Cc
+newarray :: Integer -> Integer -> (EnvVal -> Store -> Ans) -> Store -> Ans
+newarray n1 n2 k store
+  | n1 > n2 = ErrorState "Lower bound greater than upper bound"
+  | otherwise =
+      case news (n2 - n1 + 1) store of
+        Left err -> ErrorState err
+        Right (locs, store') -> k (ArrayVal n1 n2 locs) store'
+
+-- subscript: Array -> Ec -> Ec
+subscript :: Integer -> Integer -> [Integer] -> Integer -> Either String Integer
+subscript n1 n2 locs idx =
+  if between n1 n2 idx
+  then Right (locs !! fromIntegral (idx - n1))
+  else Left $ "Index " ++ show idx ++ " out of bounds ["
+              ++ show n1 ++ ".." ++ show n2 ++ "]"
