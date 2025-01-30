@@ -1,7 +1,7 @@
 module Interpreter where
 import Parser
 import Control.Exception
-import Data.List (find)
+import Data.List (find, intercalate)
 import Debug.Trace (trace) -- For debugging
 import System.IO.Unsafe (unsafePerformIO)
 
@@ -29,7 +29,8 @@ data EnvVal
   | RValue Value                       -- Represents R-values (Rv)
   | ProcDef [Args] Cmd Env             -- Represents procedures (Proc)
   | FunDef [Args] Exp Env              -- Represents functions (Fun)
-  | ArrayVal Integer Integer [Integer] -- (lb, ub, list of locations)
+  | ArrayVal Integer Integer [Integer] -- Arrays (lb, ub, [location]) (Array)
+  | RecordVal [Ide] Env                -- Represents records (Record)
   | LabelDef Cc                        -- Represents Label definations (Label)
   | Unbound                            -- Represents unbound identifiers
 
@@ -132,6 +133,7 @@ exp_semantics (Identifier ide) env k = \store ->
     Location loc -> k (Location loc) store
     RValue val -> k (RValue val) store
     ArrayVal _ _ _ -> k (env ide) store
+    RecordVal _ _  -> k (env ide) store
     _ -> ErrorState $ "Unexpected environment value for: " ++ ide
 
 -- E[E1(E2)] r k = E[E1] r; Fun?λf.E[E2] r; f; k
@@ -230,6 +232,18 @@ exp_semantics (ArrayAccess array idx) env k = \store ->
         _ -> ErrorState $ "Not an array: " ++ arrName
     _ -> ErrorState "Invalid array identifier"
 
+-- Semantic function for record access:
+exp_semantics (RecordAccess recordExp fieldExp) env k = \store ->
+  exp_semantics recordExp env (\recordVal store' ->
+    case recordVal of
+      RecordVal _ recordEnv ->
+        exp_semantics fieldExp recordEnv (\fieldVal store'' ->
+          case fieldVal of
+            Location loc -> k (Location loc) store''
+            _ -> ErrorState "Record field must evaluate to a location"
+        ) store'
+      _ -> ErrorState "Not a record"
+  ) store
 
 
 -- Command Semantics (C)
@@ -251,7 +265,7 @@ cmd_semantics (Assign (Identifier ide) rhs) env c = \store ->  -- lhs == Ide
       ) store
     _ -> ErrorState "Invalid location on the left-hand side"
 
--- Semantic function for array element assignment
+-- Array element assignment
 cmd_semantics (Assign (ArrayAccess array idx) rhs) env c = \store ->
   case array of
     Identifier arrName ->
@@ -279,24 +293,36 @@ cmd_semantics (Assign (ArrayAccess array idx) rhs) env c = \store ->
     _ -> ErrorState $ "Invalid array identifier"
 
 
+-- Record field assignment
+cmd_semantics (Assign (RecordAccess recordExp fieldExp) rhs) env c = \store ->
+  exp_semantics recordExp env (\recordVal store' ->
+    case recordVal of
+      RecordVal _ recordEnv ->
+        exp_semantics fieldExp recordEnv (\fieldVal store'' ->
+          case fieldVal of
+            Location loc ->
+              exp_semantics rhs env (\rhsVal store''' ->
+                case rhsVal of
+                  RValue v   -> c (upsertStore loc (SValue v) store''')
+                  Location l -> c (upsertStore loc (store''' l) store''')
+                  _          -> ErrorState "Invalid assignment value"
+              ) store''
+            _ -> ErrorState "Record field must evaluate to a location"
+        ) store'
+      _ -> ErrorState "Not a record"
+  ) store
+
 -- (C2) Output:
 -- C[output E] r c = R[E] r λe s. (e, s)
 cmd_semantics (Output exp) env c = \store ->
-  trace "Store before output :: " $ trace (show store) $
+  -- trace "Store before output :: " $ trace (show store) $
   exp_semantics exp env (\val store' ->
     case val of
       -- Create a new Result with the value and pass the continuation
       RValue v -> Result [v] (c store')
       Location _ -> Result [deref val store'] (c store')
-      ArrayVal lb ub locs ->
-        -- When outputting an array, output all its elements
-        let values = map (\loc ->
-              case store' loc of
-                SValue v -> v
-                ReservedArr -> Error "Unassigned"
-                _ -> Error "Invalid Value"  -- Invalid Value
-              ) locs
-        in Result values (c store')
+      v@(ArrayVal _ _ _) -> Result [formatArrayOutput store' v] (c store')
+      v@(RecordVal _ _)  -> Result [formatRecordOutput store' v] (c store')
       _ -> ErrorState "Output expression must evaluate to an R-value"
   ) store
 
@@ -461,6 +487,12 @@ dec_semantics (Array ide exp1 exp2) env u = \store ->
     ) store1
   ) store
 
+-- Record declaration
+dec_semantics (Record name fields) env u = \store ->
+  newrecord fields (\recordEnv store' ->
+    u (upsertEnv name (RecordVal fields recordEnv) env) store'
+  ) store
+
 
 -- Run Interpreter
 -- ----------------------------------------------------------------------------
@@ -491,10 +523,12 @@ instance Show EnvVal where
   show (RValue val) = "RValue " ++ show val
   show (ProcDef params _ _) = "ProcDef with params " ++ show params
   show (FunDef params _ _) = "FunDef with params " ++ show params
+  show (ArrayVal lb ub locs) = "ArrayVal [" ++ show lb ++ ".." ++ show ub ++ "]"
+  show (RecordVal fields _) = "RecordVal " ++ show fields
   show Unbound = "Unbound"
 
 instance Show Store where
-  show store = "Store: " ++ show [(i, store i) | i <- [0..20]]
+  show store = "Store: " ++ show [(i, store i) | i <- [0..10]]
 
 instance Show StoreVal where
   show (File values) = "File: " ++ show values
@@ -607,6 +641,7 @@ newarray n1 n2 k store
         Left err -> ErrorState err
         Right (locs, store') -> k (ArrayVal n1 n2 locs) store'
 
+
 -- subscript: Array -> Ec -> Ec
 subscript :: Integer -> Integer -> [Integer] -> Integer -> Either String Integer
 subscript n1 n2 locs idx =
@@ -614,3 +649,50 @@ subscript n1 n2 locs idx =
   then Right (locs !! fromIntegral (idx - n1))
   else Left $ "Index " ++ show idx ++ " out of bounds ["
               ++ show n1 ++ ".." ++ show n2 ++ "]"
+
+-- Array Output Formatter
+formatArrayOutput :: Store -> EnvVal -> Value
+formatArrayOutput store (ArrayVal lb ub locs) =
+  let elements = map (\(idx, loc) ->
+          case store loc of
+            SValue v    -> (show idx, v)
+            ReservedArr -> (show idx, Error "Unassigned")
+            _           -> (show idx, Error "Invalid Value")
+        ) (zip [lb..ub] locs)
+      formattedString = formatKeyValuePairs elements
+  in Str formattedString
+formatArrayOutput _ _ = Str "Invalid array value"
+
+-- Record Helper Functions
+-- ----------------------------------------------------------------------------
+
+newrecord :: [Ide] -> (Env -> Store -> Ans) -> Store -> Ans
+newrecord fields k store =
+  case news (fromIntegral (length fields)) store of
+    Left err -> ErrorState err
+    Right (locs, newStore) ->
+      let recordEnv = \field ->
+            case lookup field (zip fields locs) of
+              Just loc -> Location loc
+              Nothing  -> Unbound
+      in k recordEnv newStore
+
+formatRecordOutput :: Store -> EnvVal -> Value
+formatRecordOutput store (RecordVal fields recordEnv) =
+  let fieldValues = map (\field ->
+          case recordEnv field of
+            Location loc ->
+              case store loc of
+                SValue v -> (field, v)
+                _        -> (field, Error "Unassigned")
+            _ -> (field, Error "Invalid field")
+        ) fields
+      formattedString = formatKeyValuePairs fieldValues
+  in Str formattedString
+formatRecordOutput _ _ = Str "Invalid record value"
+
+-- FormatDSOutput
+formatKeyValuePairs :: [(String, Value)] -> String
+formatKeyValuePairs kvs =
+  "{" ++ intercalate ", " (map (\(f, v) -> f ++ ": " ++ show v) kvs) ++ "}"
+

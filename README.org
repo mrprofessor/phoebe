@@ -18,9 +18,8 @@ Description of Programming Languages]]
   - [X] Functions (Call by ref/value)
   - [X] Dynamic/Static binding
   - [X] Escapes and Jumps
-  - [ ] Data structures
-  - [ ] Iteration constructs
-  - [ ] Types ??
+  - [X] Data structures
+  - [X] Iteration constructs
   - [X] Interprets a File
   - [X] Regression tests
 
@@ -34,12 +33,12 @@ Description of Programming Languages]]
 :PROPERTIES:
 :CUSTOM_ID: basic-program-structure
 :END:
-#+BEGIN_SRC
-program
-begin
-  proc print(str) -> output str;
-  print("Hello Pheobe")
-end
+#+BEGIN_SRC pascal
+  program
+  begin
+    proc print(str) -> output str;
+    print("Hello Pheobe")
+  end
 #+END_SRC
 
 Output: =Result: [Str "Hello Pheobe"]=
@@ -48,14 +47,13 @@ Output: =Result: [Str "Hello Pheobe"]=
 :PROPERTIES:
 :CUSTOM_ID: functions-and-procedures
 :END:
-#+BEGIN_SRC
-program
-begin
-  fun add(x, y) -> x + y;
-  
-  var result = add!(5, 3);
-  output result
-end
+#+BEGIN_SRC pascal
+  program
+  begin
+    fun add(x, y) -> x + y;
+    var result = add!(5, 3);
+    output result
+  end
 #+END_SRC
 
 Output: =Result: [Numeric 8]=
@@ -64,18 +62,53 @@ Output: =Result: [Numeric 8]=
 :PROPERTIES:
 :CUSTOM_ID: control-structures
 :END:
-#+BEGIN_SRC
-program
-begin
-  var x = 10;
-  if x > 5 then
-    output x
-  else
-    output 0
-end
+#+BEGIN_SRC pascal
+  program
+  begin
+    var x = 10;
+    if x > 5 then
+      output x
+    else
+      output 0
+  end
 #+END_SRC
 
 Output: =Result: [Numeric 10]=
+
+*** Arrays
+:PROPERTIES:
+:CUSTOM_ID: arrays
+:END:
+
+#+begin_src pascal
+  program
+  begin
+    array arr[0:5];
+    arr[0] := 1;
+    arr[1] := 2;
+    output arr
+  end
+#+end_src
+
+Output: =Result: [Str "{0: Numeric 1, 1: Numeric 2, 2: Error \"Unassigned\", 3: Error \"Unassigned\", 4: Error \"Unassigned\", 5: Error \"Unassigned\"}"]=
+
+*** Records
+:PROPERTIES:
+:CUSTOM_ID: records
+:END:
+
+#+begin_src pascal
+  program
+  begin
+     record cats(loki, phoebe);
+     cats.loki := 5;
+     cats.phoebe := 3;
+     output cats
+  end
+#+end_src
+
+Output: =Result: [Str "{loki: Numeric 5, phoebe: Numeric 3}"]=
+
 
 ** Development
 :PROPERTIES:

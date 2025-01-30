@@ -23,6 +23,7 @@ data Exp
   | IfExp Exp Exp Exp
   | BinOp String Exp Exp
   | ArrayAccess Exp Exp               -- Array access using index A[i]
+  | RecordAccess Exp Exp              -- Record access using field R.f or R[I]
   deriving Show
 
 -- C::= E1 := E2 | output E | E1(E2) | if E then C1 else C2 | while E do C | begin D;C end | C1 ;C2
@@ -48,6 +49,7 @@ data Dec
   | Function Ide [Args] Exp           -- Regular function
   | RecFunction Ide [Args] Exp        -- Recursive function
   | Array Ide Exp Exp                 -- Array I[E1;E2]
+  | Record Ide [Ide]                  -- Record I[I1, I2, ...]
   | DecBlk Dec Dec
   deriving Show
 
@@ -124,7 +126,11 @@ factor =
          idx <- expr                   -- Array index
          symbol "]"
          return (ArrayAccess (Identifier id) idx)
-      +++                             -- If no [ follows, it's just an ide
+      +++
+      do symbol "."                    -- Simple record field access
+         field <- expr                 -- FIXME Supposed to be an identifier
+         return (RecordAccess (Identifier id) field)
+      +++                             -- If no [ or . follows, it's just an ide
          return (Identifier id))
   +++
   do symbol "("
@@ -211,11 +217,18 @@ cmdBlk =
 -- Declaration parsers
 dec :: Parser Dec
 dec =
+  do symbol "record"
+     name <- identifier
+     symbol "("
+     fields <- identifier `sepby` (symbol ",")
+     symbol ")"
+     return (Record name fields)
+  +++
   do symbol "array"                   -- Parse array declaration
      id <- token identifier           -- Array name
      symbol "["
      e1 <- expr                       -- Lower bound
-     symbol ";"
+     symbol ":"
      e2 <- expr                       -- Upper bound
      symbol "]"
      return (Array id e1 e2)
