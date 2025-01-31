@@ -147,11 +147,15 @@ exp_semantics (CallFun funName args) callTimeEnv k = \store ->
                       ++ show (length params) ++ " arguments, got "
                       ++ show (length args)
       else
-        -- Step 2: Evaluate the arguments
-        evalArgs args callTimeEnv store [] (\evaluatedArgs store' ->
+        trace ("x in callTimeEnv -> " ++ show (callTimeEnv "x")) $
+        trace ("x in declTimeEnv -> " ++ show (declTimeEnv "x")) $
+        -- Step 2: Choose between static or dynamic binding
+        let preferredEnv = staticMix declTimeEnv callTimeEnv
+        -- Step 3: Evaluate the arguments
+        in evalArgs args preferredEnv store [] (\evaluatedArgs store' ->
           -- Step 3: Bind Parameters to arguments in a new Environment
           let extendedEnv = foldr (\(param, envVal) env' ->
-                            upsertEnv (getParamName param) envVal env') declTimeEnv
+                            upsertEnv (getParamName param) envVal env') preferredEnv
                             (zip params evaluatedArgs)
           in
             -- Step 4: Evaluate the function body with the extended env
@@ -292,7 +296,6 @@ cmd_semantics (Assign (ArrayAccess array idx) rhs) env c = \store ->
         _ -> ErrorState $ "Array `" ++ show array ++ "` not found in environment"
     _ -> ErrorState $ "Invalid array identifier"
 
-
 -- Record field assignment
 cmd_semantics (Assign (RecordAccess recordExp fieldExp) rhs) env c = \store ->
   exp_semantics recordExp env (\recordVal store' ->
@@ -337,11 +340,15 @@ cmd_semantics (CallProc procName args) callTimeEnv c = \store ->
                       ++ show (length params) ++ " arguments, got "
                       ++ show (length args)
       else
-        -- Step 2: Evaluate the arguments
-        evalArgs args callTimeEnv store [] (\envVals store' ->
-          -- Step 3: Bind Parameters to arguments in a new Environment
-          let (finalEnv, finalStore) = bindArgs (zip params envVals) store' declTimeEnv
-          -- Step 4: Evaluate the procedure body with the extended env
+        trace ("x in callTimeEnv -> " ++ show (callTimeEnv "x")) $
+        trace ("x in declTimeEnv -> " ++ show (declTimeEnv "x")) $
+        -- Step 2: Choose between static or dynamic binding
+        let preferredEnv = staticMix declTimeEnv callTimeEnv
+        -- Step 3: Evaluate the arguments
+        in evalArgs args preferredEnv store [] (\envVals store' ->
+          -- Step 4: Bind Parameters to arguments in a new Environment
+          let (finalEnv, finalStore) = bindArgs (zip params envVals) store' preferredEnv
+          -- Step 5: Evaluate the procedure body with the extended env
           in cmd_semantics body finalEnv c finalStore
       )
 
@@ -554,13 +561,6 @@ deref envVal store = case envVal of
   RValue v -> v
 
 -- Helper function to find the next available location [FIXME :: Store NextLoc]
--- allocate store = head [i | i <- [0..], store i == Unused]
--- allocate :: Store -> Integer
--- allocate store =
---   case find (\i -> store i == Unused) [0..] of
---     Just loc -> loc
---     Nothing -> error "No unused memory locations available"
-
 allocate :: Store -> Integer
 allocate store =
   case find (\i -> store i == Unused) [1..] of  -- Start from 1 since 0 is for input
