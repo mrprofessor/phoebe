@@ -376,7 +376,7 @@ testCases =
         "  end"
       ])
       (Just [])
-      (Right $ ErrorState "Undefined Identifier: x"),
+      (Right $ ErrorState "Unexpected environment value for: x"),
 
     TestCase
     "Fails: division by zero (Interpreter)"

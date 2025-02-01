@@ -137,7 +137,6 @@ exp_semantics (Identifier ide) env k = \store ->
     _ -> ErrorState $ "Unexpected environment value for: " ++ ide
 
 -- E[E1(E2)] r k = E[E1] r; Fun?λf.E[E2] r; f; k
--- exp_semantics (CallFun funName args) env k = \store ->
 exp_semantics (CallFun funName args) callTimeEnv k = \store ->
   case callTimeEnv funName of
     -- Step 1: Evaluate the function identifier
@@ -147,10 +146,10 @@ exp_semantics (CallFun funName args) callTimeEnv k = \store ->
                       ++ show (length params) ++ " arguments, got "
                       ++ show (length args)
       else
-        trace ("x in callTimeEnv -> " ++ show (callTimeEnv "x")) $
-        trace ("x in declTimeEnv -> " ++ show (declTimeEnv "x")) $
+        -- trace ("x in callTimeEnv -> " ++ show (callTimeEnv "x")) $
+        -- trace ("x in declTimeEnv -> " ++ show (declTimeEnv "x")) $
         -- Step 2: Choose between static or dynamic binding
-        let preferredEnv = staticMix declTimeEnv callTimeEnv
+        let preferredEnv = dynamicMix declTimeEnv callTimeEnv
         -- Step 3: Evaluate the arguments
         in evalArgs args preferredEnv store [] (\evaluatedArgs store' ->
           -- Step 3: Bind Parameters to arguments in a new Environment
@@ -218,23 +217,11 @@ exp_semantics (BinOp op exp1 exp2) env k = \store ->
   ) store
 
 -- Semantic function for array access:
--- E[E₁[E₂]] r k = E[E₁] r λa.E[E₂] r λe.
---   isNum e -> (between(n₁,n₂) e -> k(l[e-n₁+1]),err),err
+-- E[E₁[E₂]] r k = E[E₁] r (subscript k e_2)
 exp_semantics (ArrayAccess array idx) env k = \store ->
-  case array of
-    Identifier arrName ->
-      case env arrName of
-        ArrayVal lb ub locs ->
-          exp_semantics idx env (\idxVal store2 ->
-            case idxVal of
-              RValue (Numeric i) ->
-                case subscript lb ub locs i of
-                  Right loc -> k (Location loc) store2
-                  Left err -> ErrorState err
-              _ -> ErrorState "Array index must be numeric"
-          ) store
-        _ -> ErrorState $ "Not an array: " ++ arrName
-    _ -> ErrorState "Invalid array identifier"
+  exp_semantics array env (\arrayVal store' ->
+    exp_semantics idx env (subscript arrayVal k) store'
+  ) store
 
 -- Semantic function for record access:
 exp_semantics (RecordAccess recordExp fieldExp) env k = \store ->
@@ -340,10 +327,10 @@ cmd_semantics (CallProc procName args) callTimeEnv c = \store ->
                       ++ show (length params) ++ " arguments, got "
                       ++ show (length args)
       else
-        trace ("x in callTimeEnv -> " ++ show (callTimeEnv "x")) $
-        trace ("x in declTimeEnv -> " ++ show (declTimeEnv "x")) $
+        -- trace ("x in callTimeEnv -> " ++ show (callTimeEnv "x")) $
+        -- trace ("x in declTimeEnv -> " ++ show (declTimeEnv "x")) $
         -- Step 2: Choose between static or dynamic binding
-        let preferredEnv = staticMix declTimeEnv callTimeEnv
+        let preferredEnv = dynamicMix declTimeEnv callTimeEnv
         -- Step 3: Evaluate the arguments
         in evalArgs args preferredEnv store [] (\envVals store' ->
           -- Step 4: Bind Parameters to arguments in a new Environment
@@ -483,22 +470,32 @@ dec_semantics (DecBlk d1 d2) env u = \store ->
 -- D[array I[E1;E2]] r u = E[E1] r \n1.E[E2] r \n2. (news n1,n2) k
 dec_semantics (Array ide exp1 exp2) env u = \store ->
   -- Evaluate lower bound
-  exp_semantics exp1 env (\val1 store1 ->
+  exp_semantics exp1 env (\val1 store' ->
     -- Evaluate upper bound
-    exp_semantics exp2 env (\val2 store2 ->
+    exp_semantics exp2 env (\val2 store'' ->
       case (val1, val2) of
         (RValue (Numeric lb), RValue (Numeric ub)) ->
-          newarray lb ub (\arrayVal store' ->
-            u (upsertEnv ide arrayVal env) store') store2
+          newarray (lb, ub) (\arrayVal ->
+            \s -> u (upsertEnv ide arrayVal env) s) store''
         _ -> ErrorState "Array bounds must be numeric"
-    ) store1
+    ) store'
   ) store
 
--- Record declaration
+-- Semantic record for array declaration
+-- D[record I[I₁,...,Iₙ]] r u s
+-- = (news n s = (l₁,...lₙ,s')) → u(l₁,...,lₙ/I₁,...,Iₙ)/I) s',error
 dec_semantics (Record name fields) env u = \store ->
-  newrecord fields (\recordEnv store' ->
-    u (upsertEnv name (RecordVal fields recordEnv) env) store'
-  ) store
+  -- Call news to allocate n locations for n fields
+  case news (fromIntegral (length fields)) store of 
+    Left err -> ErrorState err
+    Right (locs, store') ->
+      -- Create environment for record fields
+      let recordEnv = \k -> case lookup k (zip fields locs) of
+                             Just loc -> Location loc
+                             Nothing -> Unbound
+          -- Add record to environment and continue
+          extendedEnv = upsertEnv name (RecordVal fields recordEnv) env
+      in u extendedEnv store'
 
 
 -- Run Interpreter
@@ -633,22 +630,25 @@ news n store
       in Right (locs, newStore)
 
 -- newarray: [Num × Num] -> Ec -> Cc
-newarray :: Integer -> Integer -> (EnvVal -> Store -> Ans) -> Store -> Ans
-newarray n1 n2 k store
-  | n1 > n2 = ErrorState "Lower bound greater than upper bound"
-  | otherwise =
-      case news (n2 - n1 + 1) store of
-        Left err -> ErrorState err
-        Right (locs, store') -> k (ArrayVal n1 n2 locs) store'
-
+newarray :: (Integer, Integer) -> Ec -> Cc
+newarray (n1, n2) k = \store ->
+  if n1 > n2 
+  then ErrorState "Lower bound greater than upper bound"
+  else case news (n2 - n1 + 1) store of
+         Left err -> ErrorState err
+         Right (locs, store') -> k (ArrayVal n1 n2 locs) store'
 
 -- subscript: Array -> Ec -> Ec
-subscript :: Integer -> Integer -> [Integer] -> Integer -> Either String Integer
-subscript n1 n2 locs idx =
-  if between n1 n2 idx
-  then Right (locs !! fromIntegral (idx - n1))
-  else Left $ "Index " ++ show idx ++ " out of bounds ["
-              ++ show n1 ++ ".." ++ show n2 ++ "]"
+subscript :: EnvVal -> Ec -> Ec
+subscript (ArrayVal lb ub locs) k = \val store ->
+  case val of
+    RValue (Numeric idx) ->
+      if between lb ub idx
+      then k (Location (locs !! fromIntegral (idx - lb))) store
+      else ErrorState $ "Index " ++ show idx ++ " out of bounds [" 
+                       ++ show lb ++ ".." ++ show ub ++ "]"
+    _ -> ErrorState "Array index must be numeric"
+subscript _ _ = \_ _ -> ErrorState "Not an array"
 
 -- Array Output Formatter
 formatArrayOutput :: Store -> EnvVal -> Value
@@ -663,20 +663,7 @@ formatArrayOutput store (ArrayVal lb ub locs) =
   in Str formattedString
 formatArrayOutput _ _ = Str "Invalid array value"
 
--- Record Helper Functions
--- ----------------------------------------------------------------------------
-
-newrecord :: [Ide] -> (Env -> Store -> Ans) -> Store -> Ans
-newrecord fields k store =
-  case news (fromIntegral (length fields)) store of
-    Left err -> ErrorState err
-    Right (locs, newStore) ->
-      let recordEnv = \field ->
-            case lookup field (zip fields locs) of
-              Just loc -> Location loc
-              Nothing  -> Unbound
-      in k recordEnv newStore
-
+-- Record Output Formatter
 formatRecordOutput :: Store -> EnvVal -> Value
 formatRecordOutput store (RecordVal fields recordEnv) =
   let fieldValues = map (\field ->
@@ -691,8 +678,7 @@ formatRecordOutput store (RecordVal fields recordEnv) =
   in Str formattedString
 formatRecordOutput _ _ = Str "Invalid record value"
 
--- FormatDSOutput
+-- Format kv output
 formatKeyValuePairs :: [(String, Value)] -> String
 formatKeyValuePairs kvs =
   "{" ++ intercalate ", " (map (\(f, v) -> f ++ ": " ++ show v) kvs) ++ "}"
-
