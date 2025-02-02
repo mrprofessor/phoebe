@@ -1,10 +1,11 @@
 .PHONY: all test parser interpreter run build clean
 
 SRC_DIRS := src src/lib
-GHC_FLAGS := $(foreach d, $(SRC_DIRS), -i$d) -package containers
+TEST_DIR := tests
+GHC_FLAGS := $(foreach d, $(SRC_DIRS), -i$d) -package containers -package hspec
 
 test:
-	ghci $(GHC_FLAGS) src/Tests.hs -e runTests
+	ghci $(GHC_FLAGS) -i$(TEST_DIR) $(TEST_DIR)/Main.hs -e main
 
 parser:
 	ghci $(GHC_FLAGS) src/Parser.hs
@@ -20,4 +21,5 @@ build:
 
 clean:
 	rm -f dist/*
-
+	find . -name "*.o" -type f -delete
+	find . -name "*.hi" -type f -delete

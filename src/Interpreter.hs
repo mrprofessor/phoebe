@@ -16,7 +16,7 @@ import System.IO.Unsafe (unsafePerformIO)
 -- Bv = Num + Bool + Str + Loc (Basic Values) (Not Required)
 
 -- Rv = Bool + Bv (basic values and booleans)
-data Value 
+data Value
   = Numeric Integer                    -- Represents basic values (Bv)
   | Boolean Bool                       -- Represents boolean values (Bool)
   | Str String                         -- Represents string values (String)
@@ -217,7 +217,7 @@ exp_semantics (BinOp op exp1 exp2) env k = \store ->
   ) store
 
 -- Semantic function for array access:
--- E[E₁[E₂]] r k = E[E₁] r (subscript k e_2)
+-- E[E1[E2]] r k = E[E1] r (subscript k e_2)
 exp_semantics (ArrayAccess array idx) env k = \store ->
   exp_semantics array env (\arrayVal store' ->
     exp_semantics idx env (subscript arrayVal k) store'
@@ -339,7 +339,7 @@ cmd_semantics (CallProc procName args) callTimeEnv c = \store ->
           in cmd_semantics body finalEnv c finalStore
       )
 
--- (C4) Conditional: 
+-- (C4) Conditional:
 -- C[if E then C1 else C2] r c = R[E] r ; Bool? ; cond(C[C1] r c, C[C2] r c)
 cmd_semantics (IfCmd condition thenCmd elseCmd) env c = \store ->
   exp_semantics condition env (\conditionVal store' ->
@@ -361,7 +361,7 @@ cmd_semantics (WhileDo condition body) env c = \store ->
       _ -> ErrorState $ "Expected a boolean in while condition, got: "
                       ++ show conditionVal
   ) store
-                                
+
 -- (C6) Begin End Block:
 -- C[begin D;C end] r c = D[D] r λr'.C[C] r[r'] c
 cmd_semantics (BeginEnd decs cmds) env c = \store ->
@@ -418,7 +418,7 @@ dec_semantics (Constant ide exp) env u = \store ->
 
 -- (D2) Variable declaration:
 -- D[var I = E] r u = R[E] r; ref λi . u(i/I)
-dec_semantics (Variable ide exp) env u = \store -> 
+dec_semantics (Variable ide exp) env u = \store ->
   exp_semantics exp env (\val store' ->
     case val of
       RValue v ->
@@ -486,7 +486,7 @@ dec_semantics (Array ide exp1 exp2) env u = \store ->
 -- = (news n s = (l₁,...lₙ,s')) → u(l₁,...,lₙ/I₁,...,Iₙ)/I) s',error
 dec_semantics (Record name fields) env u = \store ->
   -- Call news to allocate n locations for n fields
-  case news (fromIntegral (length fields)) store of 
+  case news (fromIntegral (length fields)) store of
     Left err -> ErrorState err
     Right (locs, store') ->
       -- Create environment for record fields
@@ -632,7 +632,7 @@ news n store
 -- newarray: [Num × Num] -> Ec -> Cc
 newarray :: (Integer, Integer) -> Ec -> Cc
 newarray (n1, n2) k = \store ->
-  if n1 > n2 
+  if n1 > n2
   then ErrorState "Lower bound greater than upper bound"
   else case news (n2 - n1 + 1) store of
          Left err -> ErrorState err
@@ -645,7 +645,7 @@ subscript (ArrayVal lb ub locs) k = \val store ->
     RValue (Numeric idx) ->
       if between lb ub idx
       then k (Location (locs !! fromIntegral (idx - lb))) store
-      else ErrorState $ "Index " ++ show idx ++ " out of bounds [" 
+      else ErrorState $ "Index " ++ show idx ++ " out of bounds ["
                        ++ show lb ++ ".." ++ show ub ++ "]"
     _ -> ErrorState "Array index must be numeric"
 subscript _ _ = \_ _ -> ErrorState "Not an array"

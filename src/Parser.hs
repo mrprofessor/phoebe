@@ -10,7 +10,7 @@ type Ide = String
 
 -- P ::= program C
 data Program = Program Cmd
-  deriving Show
+    deriving (Show, Eq)
 
 -- E :: = B | true | false | read | I | E1 (E2) | if E then E1 else E2 | E O E2
 data Exp
@@ -24,7 +24,7 @@ data Exp
   | BinOp String Exp Exp
   | ArrayAccess Exp Exp               -- Array access using index A[i]
   | RecordAccess Exp Exp              -- Record access using field R.f or R[I]
-  deriving Show
+  deriving (Show, Eq)
 
 -- C::= E1 := E2 | output E | E1(E2) | if E then C1 else C2 | while E do C | begin D;C end | C1 ;C2
 data Cmd
@@ -38,7 +38,7 @@ data Cmd
   | Trap Cmd [(Ide, Cmd)]             -- trap C [I1: C1, I2: C2, ...] end
   | EscapeTo Ide
   | Label Ide Cmd
-  deriving Show
+  deriving (Show, Eq)
 
 -- D ::= const I = E | var I = E | proc I(I1),C | fun I(I1),E | D1;D2
 data Dec
@@ -51,17 +51,17 @@ data Dec
   | Array Ide Exp Exp                 -- Array I[E1;E2]
   | Record Ide [Ide]                  -- Record I[I1, I2, ...]
   | DecBlk Dec Dec
-  deriving Show
+  deriving (Show, Eq)
 
 data ParsedResult
   = ParseOk Program
   | ParseError String
-  deriving Show
+  deriving (Show, Eq)
 
 data Args
   = ValueParam Ide                    -- Pass-by-value
   | ReferenceParam Ide                -- Pass-by-reference
-  deriving Show
+  deriving (Show, Eq)
 
 binop :: Parser String
 binop = do   symbol "<="  ; return "<="
