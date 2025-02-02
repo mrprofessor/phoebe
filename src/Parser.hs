@@ -38,6 +38,7 @@ data Cmd
   | Trap Cmd [(Ide, Cmd)]             -- trap C [I1: C1, I2: C2, ...] end
   | EscapeTo Ide
   | Label Ide Cmd
+  | ForLoop Ide Exp Exp Cmd           -- for I := E1 to E2 do C
   deriving (Show, Eq)
 
 -- D ::= const I = E | var I = E | proc I(I1),C | fun I(I1),E | D1;D2
@@ -191,10 +192,19 @@ cmd =
      symbol "end"
      return (Trap body labels)
   +++
-
   do symbol "escapeto"
      label <- token identifier
      return (EscapeTo label)
+  +++
+  do symbol "for"
+     i <- token identifier
+     symbol ":="
+     e1 <- expr
+     symbol "to"
+     e2 <- expr
+     symbol "do"
+     c <- cmd
+     return (ForLoop i e1 e2 c)
   +++
   do name <- token identifier
      symbol ":"

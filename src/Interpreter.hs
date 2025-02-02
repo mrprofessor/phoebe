@@ -27,8 +27,8 @@ data Value
 data EnvVal
   = Location Integer                   -- Represents locations (Loc)
   | RValue Value                       -- Represents R-values (Rv)
-  | ProcDef [Args] Cmd Env             -- Represents procedures (Proc)
-  | FunDef [Args] Exp Env              -- Represents functions (Fun)
+  | ProcValue Proc                     -- Procedure Value Proc = Cc -> Ec
+  | FunValue Fun                       -- Function Value Fun = Ec -> Ec
   | ArrayVal Integer Integer [Integer] -- Arrays (lb, ub, [location]) (Array)
   | RecordVal [Ide] Env                -- Represents records (Record)
   | LabelDef Cc                        -- Represents Label definations (Label)
@@ -60,6 +60,15 @@ data Ans
 type Ec = EnvVal -> Cc           -- Ec = Ev -> Cc
 type Cc = Store -> Ans           -- Cc = Store -> Ans
 type Dc = Env -> Cc              -- Dc = Env -> Cc
+
+-- Procedure and Function Domains
+-- type Proc = Cc -> Ec                   -- Proc = Cc -> Ec
+-- type Fun  = Ec -> Ec                   -- Fun  = Ec -> Ec
+-- type Proc = Cc -> [EnvVal] -> Cc       -- p = λc(e1,...,en)
+-- type Fun  = Ec -> [EnvVal] -> Cc       -- f = λk(e1,...,en)
+
+type Proc = Env -> Cc -> [EnvVal] -> Cc   -- Proc = Env -> Cc -> [Ev] -> Cc
+type Fun  = Env -> Ec -> [EnvVal] -> Cc   -- Fun  = Env -> Ec -> [Ev] -> Cc
 
 -- Mix Functions/Procedure type
 type Mix = Env -> Env -> Env
@@ -137,31 +146,12 @@ exp_semantics (Identifier ide) env k = \store ->
     _ -> ErrorState $ "Unexpected environment value for: " ++ ide
 
 -- E[E1(E2)] r k = E[E1] r; Fun?λf.E[E2] r; f; k
-exp_semantics (CallFun funName args) callTimeEnv k = \store ->
-  case callTimeEnv funName of
-    -- Step 1: Evaluate the function identifier
-    FunDef params body declTimeEnv ->
-      if length params /= length args
-      then ErrorState $ "Function " ++ funName ++ " expects "
-                      ++ show (length params) ++ " arguments, got "
-                      ++ show (length args)
-      else
-        -- trace ("x in callTimeEnv -> " ++ show (callTimeEnv "x")) $
-        -- trace ("x in declTimeEnv -> " ++ show (declTimeEnv "x")) $
-        -- Step 2: Choose between static or dynamic binding
-        let preferredEnv = dynamicMix declTimeEnv callTimeEnv
-        -- Step 3: Evaluate the arguments
-        in evalArgs args preferredEnv store [] (\evaluatedArgs store' ->
-          -- Step 3: Bind Parameters to arguments in a new Environment
-          let extendedEnv = foldr (\(param, envVal) env' ->
-                            upsertEnv (getParamName param) envVal env') preferredEnv
-                            (zip params evaluatedArgs)
-          in
-            -- Step 4: Evaluate the function body with the extended env
-            exp_semantics body extendedEnv k store'
-      )
+exp_semantics (CallFun funName args) env k = \store ->
+  case env funName of
+    FunValue fun ->
+      evalArgs args env store [] (\vals store' ->
+        fun env k vals store')
     _ -> ErrorState $ "Undefined or invalid function: " ++ funName
-
 
 -- E[if E then E1 else E2] r k = R[E] r; Bool?; cond(E[E1] r k, E[E2] r k)
 exp_semantics (IfExp condition thenExp elseExp) env k = \store ->
@@ -172,7 +162,6 @@ exp_semantics (IfExp condition thenExp elseExp) env k = \store ->
       _ -> ErrorState $ "Expected a boolean in if condition, got: "
                       ++ show conditionVal
     ) store
-
 
 -- E[E1 O E2] r k = R[E1] r λe1. R[E2] r λe2. O[O](e1, e2) k
 exp_semantics (BinOp op exp1 exp2) env k = \store ->
@@ -318,26 +307,12 @@ cmd_semantics (Output exp) env c = \store ->
 
 -- (C3) Procedure Call:
 -- C[E1(E2)] r c = E[E1] r ; Proc? λp . E[E2] r ; p ; c
-cmd_semantics (CallProc procName args) callTimeEnv c = \store ->
-  -- Step 1: Evaluate the procedure identifier
-  case callTimeEnv procName of
-    ProcDef params body declTimeEnv ->
-      if length params /= length args
-      then ErrorState $ "Procedure " ++ procName ++ " expects "
-                      ++ show (length params) ++ " arguments, got "
-                      ++ show (length args)
-      else
-        -- trace ("x in callTimeEnv -> " ++ show (callTimeEnv "x")) $
-        -- trace ("x in declTimeEnv -> " ++ show (declTimeEnv "x")) $
-        -- Step 2: Choose between static or dynamic binding
-        let preferredEnv = dynamicMix declTimeEnv callTimeEnv
-        -- Step 3: Evaluate the arguments
-        in evalArgs args preferredEnv store [] (\envVals store' ->
-          -- Step 4: Bind Parameters to arguments in a new Environment
-          let (finalEnv, finalStore) = bindArgs (zip params envVals) store' preferredEnv
-          -- Step 5: Evaluate the procedure body with the extended env
-          in cmd_semantics body finalEnv c finalStore
-      )
+cmd_semantics (CallProc procName args) env c = \store ->
+  case env procName of
+    ProcValue proc ->
+      evalArgs args env store [] (\vals store' ->
+        proc env c vals store')
+    _ -> ErrorState $ "Undefined or invalid procedure: " ++ procName
 
 -- (C4) Conditional:
 -- C[if E then C1 else C2] r c = R[E] r ; Bool? ; cond(C[C1] r c, C[C2] r c)
@@ -377,7 +352,7 @@ cmd_semantics (CmdBlk c1 c2) env c = \store ->
   ) store
 
 -- Trap semantics:
--- C[trap C l₁:C₁,...,ln:Cn end] r c = C[C] r(C[C₁] r c/l₁,...,C[Cn] r c/ln) c
+-- C[trap C l1:C1,...,ln:Cn end] r c = C[C] r(C[C1] r c/l1,...,C[Cn] r c/ln) c
 cmd_semantics (Trap body handlers) env c = \store ->
   -- First, create continuations for each handler
   let createLabelContinuation (label, handler) curEnv =
@@ -434,33 +409,53 @@ dec_semantics (Variable ide exp) env u = \store ->
 
 -- (D3) Procedure declaration:
 -- D[proc I(I1); C] r u = u(p/I) where p = (λc e . C[C] r[e/I1] c)
-dec_semantics (Procedure name params body) env u = \store ->
-  let procDef = ProcDef params body env
-      env' = upsertEnv name procDef env
-  in u env' store
+dec_semantics (Procedure name params body) declEnv u = \store ->
+  let proc = \callEnv -> \c -> \args -> \store' ->
+        -- Create environment for procedure execution using dynamic binding
+        let preferredEnv = dynamicMix declEnv callEnv
+            (procEnv, procStore) = bindArgs (zip params args) store' preferredEnv
+        in cmd_semantics body procEnv c procStore
+  in u (upsertEnv name (ProcValue proc) declEnv) store
 
 -- Recursive Procedure
-dec_semantics (RecProcedure name params body) env u = \store ->
-  let procDef = ProcDef params body env'
-      env' = upsertEnv name procDef env      -- lazy recursive binding of env'
-  in u env' store
+dec_semantics (RecProcedure name params body) declEnv u = \store ->
+  let proc = \callEnv -> \c -> \args -> \store' ->
+        -- Create environment with procedure bound to itself
+        let recursiveEnv = upsertEnv name (ProcValue proc) declEnv
+            -- Mix recursive environment with call environment
+            preferredEnv = dynamicMix recursiveEnv callEnv
+            -- Bind parameters in the recursive environment
+            (procEnv, procStore) = bindArgs (zip params args) store' preferredEnv
+        in cmd_semantics body procEnv c procStore
+  -- Update environment with the recursive procedure
+  in u (upsertEnv name (ProcValue proc) declEnv) store
 
 -- (D4) Function declaration:
 -- D[fun I(I1); E] r u = u(f/I) where f = (λk e . E[E] r[e/I] k)/I)
-dec_semantics (Function name params body) env u = \store ->
-  let funDef = FunDef params body env   -- Create function closure
-      env' = upsertEnv name funDef env  -- Extend environment with closure
-  in u env' store
+dec_semantics (Function name params body) declEnv u = \store ->
+  let fun = \callEnv -> \k -> \args -> \store' ->
+        -- Create environment for function execution using dynamic binding
+        let preferredEnv = dynamicMix declEnv callEnv
+            (funEnv, funStore) = bindArgs (zip params args) store' preferredEnv
+        in exp_semantics body funEnv k funStore
+  in u (upsertEnv name (FunValue fun) declEnv) store
 
 -- Recursive Function
 -- D[fun I(I1); E] r u = u(f/I) where rec f = (λk e . E[E] r[f,e/I,I1] k)/I)
-dec_semantics (RecFunction name params body) env u = \store ->
-  let funDef = FunDef params body env'
-      env' = upsertEnv name funDef env  -- lazy recursive binding of env'
-  in u env' store
+dec_semantics (RecFunction name params body) declEnv u = \store ->
+  let fun = \callEnv -> \k -> \args -> \store' ->
+        -- Create environment with function bound to itself
+        let recursiveEnv = upsertEnv name (FunValue fun) declEnv
+            -- Mix recursive environment with call environment
+            preferredEnv = dynamicMix recursiveEnv callEnv
+            -- Bind parameters in the recursive environment
+            (funEnv, funStore) = bindArgs (zip params args) store' preferredEnv
+        in exp_semantics body funEnv k funStore
+  -- Update environment with the recursive function
+  in u (upsertEnv name (FunValue fun) declEnv) store
 
 -- (D5) Sequence of declarations:
--- D[D1;D2] r u = D[D1] r λr₁ . D[D2] r[r1] λr2 . u(r1[r2])
+-- D[D1;D2] r u = D[D1] r λr1 . D[D2] r[r1] λr2 . u(r1[r2])
 dec_semantics (DecBlk d1 d2) env u = \store ->
   dec_semantics d1 env (\extendedEnv store' ->
     dec_semantics d2 extendedEnv u store'
@@ -482,8 +477,8 @@ dec_semantics (Array ide exp1 exp2) env u = \store ->
   ) store
 
 -- Semantic record for array declaration
--- D[record I[I₁,...,Iₙ]] r u s
--- = (news n s = (l₁,...lₙ,s')) → u(l₁,...,lₙ/I₁,...,Iₙ)/I) s',error
+-- D[record I[I1,...,In]] r u s
+-- = (news n s = (l1,...ln,s')) → u(l1,...,ln/I1,...,In)/I) s',error
 dec_semantics (Record name fields) env u = \store ->
   -- Call news to allocate n locations for n fields
   case news (fromIntegral (length fields)) store of
@@ -525,8 +520,8 @@ flattenResults (Stop _) = []        -- Stop accumulating at Stop
 instance Show EnvVal where
   show (Location loc) = "Location " ++ show loc
   show (RValue val) = "RValue " ++ show val
-  show (ProcDef params _ _) = "ProcDef with params " ++ show params
-  show (FunDef params _ _) = "FunDef with params " ++ show params
+  -- show (ProcDef params _ _) = "ProcDef with params " ++ show params
+  -- show (FunDef params _ _) = "FunDef with params " ++ show params
   show (ArrayVal lb ub locs) = "ArrayVal [" ++ show lb ++ ".." ++ show ub ++ "]"
   show (RecordVal fields _) = "RecordVal " ++ show fields
   show Unbound = "Unbound"
@@ -583,11 +578,7 @@ evalArgs :: [Exp] -> Env -> Store -> [EnvVal] -> ([EnvVal] -> Store -> Ans) -> A
 evalArgs [] _ store evaluatedArgs k = k (reverse evaluatedArgs) store
 evalArgs (arg:rest) env store evaluatedArgs k =
   exp_semantics arg env (\val store' ->
-    case val of
-      RValue v -> evalArgs rest env store' (RValue v:evaluatedArgs) k
-      Location loc -> evalArgs rest env store' (Location loc:evaluatedArgs) k
-      _ -> ErrorState $ "Invalid function argument: " ++ show val
-  ) store
+    evalArgs rest env store' (val:evaluatedArgs) k) store
 
 -- Helper function to bind arguments to parameters
 -- (call-by-value and call-by-reference)

@@ -104,6 +104,12 @@ spec = do
           (BinOp ">" (Identifier "x") (Number 0))
           (Output (Identifier "x"))))
 
+    it "parses while loops" $
+      assertParses
+        "program for i := 0 to 10 do output x"
+        (Program (ForLoop "i" (Number 0) (Number 10)
+          (Output (Identifier "x"))))
+
   describe "Arrays" $ do
     it "parses array declarations" $
       assertParses
